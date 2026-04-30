@@ -25,3 +25,15 @@ module "frontend_cloudfront" {
   source      = "./modules/frontend_cloudfront"
   name_prefix = local.name_prefix
 }
+
+module "github_oidc" {
+  source      = "./modules/github_oidc"
+  github_repo = var.github_repo
+
+  ecr_repository_arns         = [module.ecr.repository_arn]
+  s3_bucket_arn               = module.frontend_cloudfront.s3_bucket_arn
+  cloudfront_distribution_arn = module.frontend_cloudfront.cloudfront_distribution_arn
+
+  # Set to false if a GitHub OIDC provider already exists in this account
+  create_oidc_provider = var.create_github_oidc_provider
+}

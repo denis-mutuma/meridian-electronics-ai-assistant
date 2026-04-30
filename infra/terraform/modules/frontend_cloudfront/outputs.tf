@@ -17,3 +17,13 @@ output "frontend_url" {
   value       = "https://${aws_cloudfront_distribution.site.domain_name}"
   description = "HTTPS URL for the static frontend"
 }
+
+output "s3_bucket_arn" {
+  value       = aws_s3_bucket.site.arn
+  description = "ARN of the frontend S3 bucket"
+}
+
+output "cloudfront_distribution_arn" {
+  value       = aws_cloudfront_distribution.site.arn
+  description = "ARN of the CloudFront distribution"
+}

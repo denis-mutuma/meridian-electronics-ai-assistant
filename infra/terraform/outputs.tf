@@ -38,6 +38,11 @@ output "frontend_origin_https" {
   description = "Same as frontend_url — set ECS ALLOWED_ORIGINS / GitHub var to this for CORS"
 }
 
+output "github_actions_role_arn" {
+  value       = module.github_oidc.role_arn
+  description = "IAM role ARN for GitHub Actions OIDC (set AWS_ROLE_ARN GitHub var if you override the default)"
+}
+
 output "openai_secret_arn" {
   value       = module.openai_secret.secret_arn
   description = "Secret ARN for OpenAI API key (ECS task definition secrets.valueFrom)"

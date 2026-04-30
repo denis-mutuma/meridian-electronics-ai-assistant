@@ -48,3 +48,15 @@ variable "api_gateway_throttling_rate_limit" {
   type        = number
   default     = 50
 }
+
+variable "github_repo" {
+  description = "GitHub repository allowed to assume the CI/CD role, in owner/name format"
+  type        = string
+  default     = "denis-mutuma/meridian-electronics-ai-assistant"
+}
+
+variable "create_github_oidc_provider" {
+  description = "Set to false if a GitHub Actions OIDC provider already exists in this AWS account"
+  type        = bool
+  default     = true
+}
