@@ -16,6 +16,7 @@ using SSE return 406 Not Acceptable without it.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from typing import Any
@@ -114,6 +115,25 @@ class MCPClient:
         """Generate a unique JSON-RPC request ID."""
         return str(uuid.uuid4())
 
+    @staticmethod
+    def _parse_sse_body(text: str) -> dict[str, Any]:
+        """
+        Extract the first JSON-RPC message from an SSE-formatted response body.
+
+        SSE lines look like:  data: {"jsonrpc":"2.0","id":"...","result":{...}}
+        Raises RuntimeError if no valid JSON-RPC data line is found.
+        """
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("data:"):
+                data = line[len("data:"):].strip()
+                if data and data != "[DONE]":
+                    try:
+                        return json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+        raise RuntimeError("No valid JSON-RPC data found in SSE response")
+
     async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         """
         Send a JSON-RPC POST and return the unwrapped result dict.
@@ -135,7 +155,15 @@ class MCPClient:
             response = await client.post(self.server_url, json=payload, headers=headers)
 
         response.raise_for_status()
-        body = response.json()
+
+        # MCP servers may reply with either application/json or text/event-stream.
+        # Parse SSE bodies by extracting the first `data:` line that contains a
+        # valid JSON-RPC response; fall back to regular JSON otherwise.
+        content_type = response.headers.get("content-type", "")
+        if "text/event-stream" in content_type:
+            body = self._parse_sse_body(response.text)
+        else:
+            body = response.json()
 
         # Surface JSON-RPC application-level errors as Python exceptions.
         if "error" in body:

@@ -103,8 +103,9 @@ class LLMService:
             model=settings.openai_model,
             temperature=0.2,       # Low temperature for consistent, factual responses.
             messages=full_messages,
-            tools=tools or None,   # Pass None (not []) when no tools are available.
-            tool_choice="auto",    # Let the model decide when to call tools.
+            # Only pass tool-related parameters when tools are actually available.
+            # Sending tool_choice="auto" with tools=None causes an API error.
+            **({"tools": tools, "tool_choice": "auto"} if tools else {}),
         )
 
         choice = response.choices[0].message
