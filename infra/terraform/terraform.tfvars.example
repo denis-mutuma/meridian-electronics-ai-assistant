@@ -10,4 +10,5 @@ openai_api_key        = "sk-replace_me"
 #   NEXT_PUBLIC_API_BASE_URL  = terraform output api_gateway_invoke_url
 #   FRONTEND_S3_BUCKET        = terraform output frontend_s3_bucket
 #   CLOUDFRONT_DISTRIBUTION_ID = terraform output cloudfront_distribution_id
+#   OPENAI_SECRET_ARN         = terraform output openai_secret_arn
 #   ALLOWED_ORIGINS           = terraform output frontend_origin_https

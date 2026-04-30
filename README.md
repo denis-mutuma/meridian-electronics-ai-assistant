@@ -35,11 +35,11 @@ Terraform provisions **ECR**, **Secrets Manager** (OpenAI key only), **HTTP API 
 | `api_gateway_invoke_url` | Set GitHub variable **`NEXT_PUBLIC_API_BASE_URL`** for CI builds |
 | `frontend_s3_bucket` | GitHub variable **`FRONTEND_S3_BUCKET`** |
 | `cloudfront_distribution_id` | GitHub variable **`CLOUDFRONT_DISTRIBUTION_ID`** |
-| `openai_secret_arn` | ECS task `secrets` for `OPENAI_API_KEY` |
+| `openai_secret_arn` | GitHub variable or secret **`OPENAI_SECRET_ARN`** consumed by the deploy workflow to inject `OPENAI_API_KEY` into ECS |
 
 ### ECS task definition
 
-Store **OpenAI** in Secrets Manager (Terraform creates the secret from `openai_api_key`). Point the container at `openai_secret_arn`. The GitHub Actions OIDC role needs **`s3:PutObject`**, **`s3:DeleteObject`**, **`s3:ListBucket`** on the frontend bucket, and **`cloudfront:CreateInvalidation`** on the distribution (in addition to existing ECR/ECS permissions).
+Store **OpenAI** in Secrets Manager (Terraform creates the secret from `openai_api_key`). The deploy workflow injects that secret into the ECS task definition automatically from **`OPENAI_SECRET_ARN`**. The GitHub Actions OIDC role needs **`s3:PutObject`**, **`s3:DeleteObject`**, **`s3:ListBucket`** on the frontend bucket, and **`cloudfront:CreateInvalidation`** on the distribution (in addition to existing ECR/ECS permissions).
 
 ## Repository layout
 
@@ -79,16 +79,18 @@ npm run dev
 
 Required: `project_name`, `environment`, `aws_region`, `ecs_backend_https_url`, `openai_api_key`.
 
+`ecs_backend_https_url` must be the HTTPS ALB origin, for example `https://your-alb.us-east-1.elb.amazonaws.com`. Do not point it at the API Gateway `execute-api` URL.
+
 Remove any leftover keys from older configs (**`github_repository`**, **`github_token`**, **`git_branch`**, **`jwt_secret`**) so Terraform does not warn about undeclared variables.
 
 ## GitHub Actions variables
 
-Set **`NEXT_PUBLIC_API_BASE_URL`**, **`FRONTEND_S3_BUCKET`**, and **`CLOUDFRONT_DISTRIBUTION_ID`** from Terraform outputs so the **`deploy-frontend`** job runs (it is skipped until all three are non-empty). Optional **`ALLOWED_ORIGINS`** = `terraform output -raw frontend_origin_https` for CORS.
+Set **`NEXT_PUBLIC_API_BASE_URL`**, **`FRONTEND_S3_BUCKET`**, **`CLOUDFRONT_DISTRIBUTION_ID`**, and **`OPENAI_SECRET_ARN`** from Terraform outputs so the deploy workflows can complete. Optional **`ALLOWED_ORIGINS`** = `terraform output -raw frontend_origin_https` for CORS.
 
 ## Workflow model
 
 - [`ci.yml`](.github/workflows/ci.yml): PRs and non-`main` pushes; backend tests + frontend static build.
-- [`deploy.yml`](.github/workflows/deploy.yml): push to `main`; tests; **ECS** image deploy; **S3 sync + CloudFront invalidation** when the three frontend variables are set.
+- [`deploy.yml`](.github/workflows/deploy.yml): push to `main`; tests; **ECS** image deploy with automatic OpenAI secret injection; **S3 sync + CloudFront invalidation**. The workflow fails fast if required GitHub variables are missing.
 
 ## Testing
 

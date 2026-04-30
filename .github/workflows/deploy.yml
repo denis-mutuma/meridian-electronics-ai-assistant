@@ -5,13 +5,13 @@
 #   2. Builds and pushes the backend Docker image to Amazon ECR; updates ECS.
 #   3. Syncs the static Next.js export (out/) to S3 and invalidates CloudFront.
 #
-# ECS should load OPENAI_API_KEY from Secrets Manager (see README). Optional
-# GitHub variable ALLOWED_ORIGINS should match your CloudFront URL for CORS.
+# ECS loads OPENAI_API_KEY from Secrets Manager via OPENAI_SECRET_ARN.
+# Optional GitHub variable ALLOWED_ORIGINS should match your CloudFront URL for CORS.
 #
-# Frontend deploy needs these names under Actions → Variables **or** Secrets (same keys):
-#   NEXT_PUBLIC_API_BASE_URL, FRONTEND_S3_BUCKET, CLOUDFRONT_DISTRIBUTION_ID
-# Optional Variables (defaults in env block): AWS_ROLE_ARN, AWS_REGION, ECR_*, ECS_*, CONTAINER_NAME
-# ALLOWED_ORIGINS (optional Variable): terraform output frontend_origin_https
+# Jobs use GitHub Environment `dev` so Variables/Secrets can live under
+# Settings → Environments → dev (not only repository-level Actions vars).
+# Frontend deploy needs: NEXT_PUBLIC_API_BASE_URL, FRONTEND_S3_BUCKET, CLOUDFRONT_DISTRIBUTION_ID
+# Backend deploy also needs: OPENAI_SECRET_ARN
 
 name: deploy
 
@@ -23,18 +23,10 @@ permissions:
   id-token: write
   contents: read
 
-env:
-  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::673786334778:role/meridian-electronics-github-actions' }}
-  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-  ECR_REPO_NAME: ${{ vars.ECR_REPO_NAME || 'meridian-electronics-ai-assistant-dev-backend' }}
-  ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME || 'meridian-assistant-cluster' }}
-  ECS_SERVICE_NAME: ${{ vars.ECS_SERVICE_NAME || 'meridian-assistant-backend-svc' }}
-  ECS_TASK_FAMILY: ${{ vars.ECS_TASK_FAMILY || 'meridian-assistant-backend' }}
-  ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME || 'backend' }}
-
 jobs:
   test:
     runs-on: ubuntu-latest
+    environment: dev
     steps:
       - uses: actions/checkout@v4
 
@@ -66,8 +58,30 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
+    environment: dev
+    env:
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::673786334778:role/meridian-electronics-github-actions' }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      ECR_REPO_NAME: ${{ vars.ECR_REPO_NAME || 'meridian-electronics-ai-assistant-dev-backend' }}
+      ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME || 'meridian-assistant-cluster' }}
+      ECS_SERVICE_NAME: ${{ vars.ECS_SERVICE_NAME || 'meridian-assistant-backend-svc' }}
+      ECS_TASK_FAMILY: ${{ vars.ECS_TASK_FAMILY || 'meridian-assistant-backend' }}
+      ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME || 'backend' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve backend deploy settings (Variables or Secrets)
+        env:
+          V_OPENAI_SECRET_ARN: ${{ vars.OPENAI_SECRET_ARN }}
+          S_OPENAI_SECRET_ARN: ${{ secrets.OPENAI_SECRET_ARN }}
+        run: |
+          set -e
+          OPENAI_SECRET_ARN="${V_OPENAI_SECRET_ARN:-$S_OPENAI_SECRET_ARN}"
+          if [ -z "$OPENAI_SECRET_ARN" ]; then
+            echo "::error::Define OPENAI_SECRET_ARN on GitHub Environment dev (or repo Actions Variables/Secrets) from the Terraform output openai_secret_arn."
+            exit 1
+          fi
+          echo "OPENAI_SECRET_ARN=$OPENAI_SECRET_ARN" >> "$GITHUB_ENV"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -103,6 +117,7 @@ jobs:
         env:
           IMAGE_URI: ${{ steps.image.outputs.image_uri }}
           ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
+          OPENAI_SECRET_ARN: ${{ env.OPENAI_SECRET_ARN }}
         run: |
           TASK_DEF_JSON=$(aws ecs describe-task-definition \
             --task-definition "${ECS_TASK_FAMILY}" \
@@ -113,10 +128,13 @@ jobs:
             --arg IMAGE_URI "$IMAGE_URI" \
             --arg CONTAINER "${ECS_CONTAINER_NAME}" \
             --arg ALLOWED_ORIGINS "${ALLOWED_ORIGINS:-}" \
+            --arg OPENAI_SECRET_ARN "$OPENAI_SECRET_ARN" \
             '
               .containerDefinitions |= map(
                 if .name == $CONTAINER then
                   .image = $IMAGE_URI
+                  | .environment = ((.environment // []) | map(select(.name != "OPENAI_API_KEY")))
+                  | .secrets = ((.secrets // []) | map(select(.name != "OPENAI_API_KEY")) + [{"name":"OPENAI_API_KEY","valueFrom":$OPENAI_SECRET_ARN}])
                   | if ($ALLOWED_ORIGINS | length) > 0 then
                       .environment = ((.environment // []) | map(select(.name != "ALLOWED_ORIGINS")) + [{"name":"ALLOWED_ORIGINS","value":$ALLOWED_ORIGINS}])
                     else .
@@ -151,26 +169,43 @@ jobs:
   deploy-frontend:
     needs: test
     runs-on: ubuntu-latest
+    environment: dev
     env:
-      # Prefer Variables; fall back to Secrets (many repos store these under Secrets by mistake).
-      FRONTEND_S3_BUCKET: ${{ vars.FRONTEND_S3_BUCKET || secrets.FRONTEND_S3_BUCKET }}
-      CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID || secrets.CLOUDFRONT_DISTRIBUTION_ID }}
-      NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL || secrets.NEXT_PUBLIC_API_BASE_URL }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::673786334778:role/meridian-electronics-github-actions' }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      ECR_REPO_NAME: ${{ vars.ECR_REPO_NAME || 'meridian-electronics-ai-assistant-dev-backend' }}
+      ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME || 'meridian-assistant-cluster' }}
+      ECS_SERVICE_NAME: ${{ vars.ECS_SERVICE_NAME || 'meridian-assistant-backend-svc' }}
+      ECS_TASK_FAMILY: ${{ vars.ECS_TASK_FAMILY || 'meridian-assistant-backend' }}
+      ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME || 'backend' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check configuration for frontend deploy
+      - name: Resolve frontend deploy settings (Variables or Secrets)
+        env:
+          V_BUCKET: ${{ vars.FRONTEND_S3_BUCKET }}
+          S_BUCKET: ${{ secrets.FRONTEND_S3_BUCKET }}
+          V_DIST: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+          S_DIST: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+          V_API: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+          S_API: ${{ secrets.NEXT_PUBLIC_API_BASE_URL }}
         run: |
           set -e
+          BUCKET="${V_BUCKET:-$S_BUCKET}"
+          DIST="${V_DIST:-$S_DIST}"
+          API="${V_API:-$S_API}"
           MISSING=""
-          [ -z "${FRONTEND_S3_BUCKET:-}" ] && MISSING="$MISSING FRONTEND_S3_BUCKET"
-          [ -z "${CLOUDFRONT_DISTRIBUTION_ID:-}" ] && MISSING="$MISSING CLOUDFRONT_DISTRIBUTION_ID"
-          [ -z "${NEXT_PUBLIC_API_BASE_URL:-}" ] && MISSING="$MISSING NEXT_PUBLIC_API_BASE_URL"
+          [ -z "$BUCKET" ] && MISSING="$MISSING FRONTEND_S3_BUCKET"
+          [ -z "$DIST" ] && MISSING="$MISSING CLOUDFRONT_DISTRIBUTION_ID"
+          [ -z "$API" ] && MISSING="$MISSING NEXT_PUBLIC_API_BASE_URL"
           if [ -n "$MISSING" ]; then
-            echo "::error::Set these under Settings → Secrets and variables → Actions (Variables **or** Secrets — same names):$MISSING"
+            echo "::error::Define these on GitHub Environment dev (or repo Actions Variables/Secrets), exact names:$MISSING"
+            echo "::notice::Settings → Environments → dev → Environment variables / secrets"
             exit 1
           fi
-          echo "Frontend deploy configuration OK."
+          echo "FRONTEND_S3_BUCKET=$BUCKET" >> "$GITHUB_ENV"
+          echo "CLOUDFRONT_DISTRIBUTION_ID=$DIST" >> "$GITHUB_ENV"
+          echo "NEXT_PUBLIC_API_BASE_URL=$API" >> "$GITHUB_ENV"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
