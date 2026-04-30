@@ -8,12 +8,10 @@
 # ECS should load OPENAI_API_KEY from Secrets Manager (see README). Optional
 # GitHub variable ALLOWED_ORIGINS should match your CloudFront URL for CORS.
 #
-# Repository variables (Settings → Variables):
-#   AWS_ROLE_ARN, AWS_REGION, ECR_*, ECS_*, CONTAINER_NAME (see env block)
-#   NEXT_PUBLIC_API_BASE_URL — API Gateway URL (same as terraform output api_gateway_invoke_url)
-#   FRONTEND_S3_BUCKET       — terraform output frontend_s3_bucket
-#   CLOUDFRONT_DISTRIBUTION_ID — terraform output cloudfront_distribution_id
-#   ALLOWED_ORIGINS          — optional; terraform output frontend_origin_https
+# Frontend deploy needs these names under Actions → Variables **or** Secrets (same keys):
+#   NEXT_PUBLIC_API_BASE_URL, FRONTEND_S3_BUCKET, CLOUDFRONT_DISTRIBUTION_ID
+# Optional Variables (defaults in env block): AWS_ROLE_ARN, AWS_REGION, ECR_*, ECS_*, CONTAINER_NAME
+# ALLOWED_ORIGINS (optional Variable): terraform output frontend_origin_https
 
 name: deploy
 
@@ -153,22 +151,26 @@ jobs:
   deploy-frontend:
     needs: test
     runs-on: ubuntu-latest
+    env:
+      # Prefer Variables; fall back to Secrets (many repos store these under Secrets by mistake).
+      FRONTEND_S3_BUCKET: ${{ vars.FRONTEND_S3_BUCKET || secrets.FRONTEND_S3_BUCKET }}
+      CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID || secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+      NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL || secrets.NEXT_PUBLIC_API_BASE_URL }}
     steps:
       - uses: actions/checkout@v4
 
-      # Job-level `if: vars.*` is easy to misconfigure (wrong tab, org visibility). Fail here with a clear message instead of skipping silently.
-      - name: Check required Actions variables
+      - name: Check configuration for frontend deploy
         run: |
           set -e
           MISSING=""
-          [ -z "${{ vars.FRONTEND_S3_BUCKET }}" ] && MISSING="$MISSING FRONTEND_S3_BUCKET"
-          [ -z "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" ] && MISSING="$MISSING CLOUDFRONT_DISTRIBUTION_ID"
-          [ -z "${{ vars.NEXT_PUBLIC_API_BASE_URL }}" ] && MISSING="$MISSING NEXT_PUBLIC_API_BASE_URL"
+          [ -z "${FRONTEND_S3_BUCKET:-}" ] && MISSING="$MISSING FRONTEND_S3_BUCKET"
+          [ -z "${CLOUDFRONT_DISTRIBUTION_ID:-}" ] && MISSING="$MISSING CLOUDFRONT_DISTRIBUTION_ID"
+          [ -z "${NEXT_PUBLIC_API_BASE_URL:-}" ] && MISSING="$MISSING NEXT_PUBLIC_API_BASE_URL"
           if [ -n "$MISSING" ]; then
-            echo "::error::Add these under Settings → Secrets and variables → Actions → Variables (Repository variables, not Secrets):$MISSING"
+            echo "::error::Set these under Settings → Secrets and variables → Actions (Variables **or** Secrets — same names):$MISSING"
             exit 1
           fi
-          echo "Repository variables OK for frontend deploy."
+          echo "Frontend deploy configuration OK."
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -181,23 +183,17 @@ jobs:
           node-version: "20"
 
       - name: Build static site
-        env:
-          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
         run: |
           cd frontend
           npm ci
           npm run build
 
       - name: Sync to S3
-        env:
-          BUCKET: ${{ vars.FRONTEND_S3_BUCKET }}
         run: |
-          aws s3 sync frontend/out "s3://${BUCKET}/" --delete
+          aws s3 sync frontend/out "s3://${FRONTEND_S3_BUCKET}/" --delete
 
       - name: Invalidate CloudFront
-        env:
-          DIST_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
         run: |
           aws cloudfront create-invalidation \
-            --distribution-id "${DIST_ID}" \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
             --paths "/*"
