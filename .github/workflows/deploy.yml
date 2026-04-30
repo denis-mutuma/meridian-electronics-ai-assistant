@@ -151,12 +151,24 @@ jobs:
             --services "${ECS_SERVICE_NAME}"
 
   deploy-frontend:
-    # Skip until Terraform outputs are copied into repo variables (see README).
-    if: ${{ vars.FRONTEND_S3_BUCKET != '' && vars.CLOUDFRONT_DISTRIBUTION_ID != '' && vars.NEXT_PUBLIC_API_BASE_URL != '' }}
     needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Job-level `if: vars.*` is easy to misconfigure (wrong tab, org visibility). Fail here with a clear message instead of skipping silently.
+      - name: Check required Actions variables
+        run: |
+          set -e
+          MISSING=""
+          [ -z "${{ vars.FRONTEND_S3_BUCKET }}" ] && MISSING="$MISSING FRONTEND_S3_BUCKET"
+          [ -z "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" ] && MISSING="$MISSING CLOUDFRONT_DISTRIBUTION_ID"
+          [ -z "${{ vars.NEXT_PUBLIC_API_BASE_URL }}" ] && MISSING="$MISSING NEXT_PUBLIC_API_BASE_URL"
+          if [ -n "$MISSING" ]; then
+            echo "::error::Add these under Settings → Secrets and variables → Actions → Variables (Repository variables, not Secrets):$MISSING"
+            exit 1
+          fi
+          echo "Repository variables OK for frontend deploy."
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
