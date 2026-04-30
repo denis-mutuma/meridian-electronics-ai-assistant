@@ -8,7 +8,7 @@ It provides:
 - FastAPI backend with JWT-protected chat endpoint
 - OpenAI GPT-4o-mini for response generation and tool-calling
 - MCP integration for factual business tool lookups
-- AWS deployment (App Runner backend + Amplify frontend)
+- AWS deployment (ECS Fargate backend + Amplify frontend)
 
 ## Architecture
 
@@ -19,7 +19,7 @@ Browser (Customer)
 Next.js Frontend (Amplify)
         |
         v
-FastAPI Backend (App Runner)
+FastAPI Backend (ECS Fargate)
    |                     |
    v                     v
 OpenAI GPT-4o-mini   MCP Server (tools)
@@ -85,7 +85,7 @@ Optional repository variables (with defaults in workflow):
   - Re-runs tests/build as deployment gate
   - Uses OIDC to authenticate to AWS
   - Builds and pushes backend Docker image to ECR
-  - Updates App Runner service to new image and environment values
+  - Registers a new ECS task definition revision and updates the Fargate service
 
 ## Testing
 
