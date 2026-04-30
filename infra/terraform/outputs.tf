@@ -8,9 +8,19 @@ output "backend_service_url" {
   description = "Public URL for the App Runner backend service"
 }
 
+output "backend_service_arn" {
+  value       = module.apprunner.service_arn
+  description = "App Runner backend service ARN"
+}
+
 output "frontend_domain" {
   value       = module.amplify.default_domain
   description = "Amplify default domain"
+}
+
+output "frontend_app_id" {
+  value       = module.amplify.app_id
+  description = "Amplify app ID"
 }
 
 output "openai_secret_arn" {

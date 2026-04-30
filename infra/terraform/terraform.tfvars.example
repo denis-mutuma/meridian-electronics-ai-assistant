@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars and replace placeholder values.
+
+project_name              = "meridian-electronics-ai-assistant"
+environment               = "dev"
+aws_region                = "us-east-1"
+backend_image_identifier  = "123456789012.dkr.ecr.us-east-1.amazonaws.com/meridian-electronics-ai-assistant-dev-backend:bootstrap"
+github_repository         = "https://github.com/your-org/meridian-electronics-ai-assistant"
+github_token              = "ghp_replace_me"
+git_branch                = "main"
+openai_api_key            = "sk-replace_me"
+jwt_secret                = "replace_with_long_random_secret"
+mcp_server_url            = "https://order-mcp-74afyau24q-uc.a.run.app/mcp"

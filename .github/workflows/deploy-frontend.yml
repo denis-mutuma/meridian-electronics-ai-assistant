@@ -3,11 +3,46 @@ name: deploy-frontend
 on:
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      TF_VAR_backend_image_identifier: ${{ secrets.BACKEND_IMAGE_IDENTIFIER }}
+      TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+      TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
+      TF_VAR_github_repository: ${{ secrets.GITHUB_REPOSITORY_URL }}
+      TF_VAR_github_token: ${{ secrets.AMPLIFY_GITHUB_TOKEN }}
+      AMPLIFY_BRANCH: main
     steps:
       - uses: actions/checkout@v4
-      - name: Trigger Amplify deployment
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
         run: |
-          echo "Amplify auto-build triggers on configured branch after terraform provisioning."
+          cd infra/terraform
+          terraform init
+
+      - name: Resolve Amplify app ID
+        id: tf
+        run: |
+          cd infra/terraform
+          echo "app_id=$(terraform output -raw frontend_app_id)" >> "$GITHUB_OUTPUT"
+
+      - name: Start Amplify deployment
+        env:
+          APP_ID: ${{ steps.tf.outputs.app_id }}
+        run: |
+          JOB_ID=$(aws amplify start-job --app-id "${APP_ID}" --branch-name "${AMPLIFY_BRANCH}" --job-type RELEASE --query 'jobSummary.jobId' --output text)
+          echo "Started Amplify release job ${JOB_ID} on branch ${AMPLIFY_BRANCH}"
