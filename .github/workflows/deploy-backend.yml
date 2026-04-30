@@ -1,0 +1,17 @@
+name: deploy-backend
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: |
+          cd backend
+          docker build -t meridian-backend:latest .
+      - name: Push and deploy
+        run: |
+          echo "Configure AWS auth, ECR push, and App Runner update using terraform outputs."

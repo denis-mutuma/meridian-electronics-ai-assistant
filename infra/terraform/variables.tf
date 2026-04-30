@@ -19,7 +19,23 @@ variable "aws_region" {
 variable "backend_image_identifier" {
   description = "Backend image URI for App Runner"
   type        = string
-  default     = "public.ecr.aws/docker/library/python:3.12-slim"
+}
+
+variable "github_repository" {
+  description = "GitHub repository URL for Amplify"
+  type        = string
+}
+
+variable "github_token" {
+  description = "GitHub personal access token for Amplify webhook"
+  type        = string
+  sensitive   = true
+}
+
+variable "git_branch" {
+  description = "Branch for Amplify deployment"
+  type        = string
+  default     = "main"
 }
 
 variable "openai_api_key" {
