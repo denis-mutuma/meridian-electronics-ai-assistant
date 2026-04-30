@@ -56,7 +56,10 @@ class MCPClient:
         return str(uuid.uuid4())
 
     async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
 
