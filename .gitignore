@@ -21,3 +21,4 @@ terraform.tfstate
 terraform.tfstate.*
 .terraform/
 .terraform.lock.hcl
+package-lock.json
