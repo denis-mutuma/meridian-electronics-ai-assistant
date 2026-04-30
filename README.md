@@ -38,7 +38,33 @@ npm run dev
 ```
 
 4. Use synthetic demo login credentials from `backend/app/services/demo_users.py`.
-	Example: `demo.customer1@example.com` / `1111`.
+   Example: `demo.customer1@example.com` / `1111`.
+
+## Team testing and secrets
+
+- `JWT_SECRET` in `.env` must be a long random value (do not use `change_me`).
+- For team local testing, use one shared **development-only** secret distributed out-of-band (vault/password manager/secure chat), and have each tester set it in their local `.env`.
+- Do not commit `.env` files or post real secrets in PRs/issues/chat.
+- Use different secrets for `local`, `staging`, and `production`.
+
+Generate a local secret:
+
+```bash
+openssl rand -hex 32
+```
+
+Then set in `.env`:
+
+```dotenv
+JWT_SECRET=<paste-generated-value>
+```
+
+Quick local verification:
+
+```bash
+cd backend
+uv run pytest -q
+```
 
 ## Current MVP status
 
