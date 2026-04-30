@@ -19,19 +19,12 @@ module "jwt_secret" {
   value  = var.jwt_secret
 }
 
-module "apprunner" {
-  source           = "./modules/apprunner"
-  service_name     = "${local.name_prefix}-backend"
-  image_identifier = var.backend_image_identifier
-  environment = {
-    OPENAI_MODEL    = "gpt-4o-mini"
-    MCP_SERVER_URL  = var.mcp_server_url
-    JWT_SECRET      = var.jwt_secret
-    OPENAI_API_KEY  = var.openai_api_key
-    ALLOWED_ORIGINS = "*"
-    BACKEND_HOST    = "0.0.0.0"
-    BACKEND_PORT    = "8000"
-  }
+module "http_api_gateway" {
+  source                 = "./modules/http_api_gateway"
+  name_prefix            = local.name_prefix
+  backend_https_url      = var.ecs_backend_https_url
+  throttling_burst_limit = var.api_gateway_throttling_burst_limit
+  throttling_rate_limit  = var.api_gateway_throttling_rate_limit
 }
 
 module "amplify" {
@@ -41,6 +34,6 @@ module "amplify" {
   github_token = var.github_token
   branch_name  = var.git_branch
   environment = {
-    NEXT_PUBLIC_API_BASE_URL = "https://${module.apprunner.service_url}"
+    NEXT_PUBLIC_API_BASE_URL = module.http_api_gateway.api_endpoint
   }
 }

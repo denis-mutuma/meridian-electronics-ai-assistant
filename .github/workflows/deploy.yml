@@ -3,13 +3,16 @@
 # What it does:
 #   1. Runs backend tests and frontend build (gate before any AWS work).
 #   2. Builds and pushes the backend Docker image to Amazon ECR.
-#   3. Registers a new ECS task definition revision with the new image.
+#   3. Registers a new ECS task definition revision with the new image only
+#      (secrets, environment keys, and Secrets Manager references are preserved).
 #   4. Updates the ECS Fargate service and waits for it to stabilise.
 #   5. AWS Amplify picks up the main-branch push automatically via its
 #      GitHub webhook — no extra step is needed here.
 #
-# Required GitHub Actions secrets (Settings → Secrets → Actions):
-#   OPENAI_API_KEY      — injected into the ECS task as an environment variable
+# Secrets (OPENAI_API_KEY, JWT_SECRET) should be supplied to tasks via the ECS
+# task definition `secrets` block pointing at Secrets Manager ARNs (see README).
+# Optional GitHub secret OPENAI_API_KEY is no longer written into the task by
+# this workflow.
 #
 # Repository-level variables (Settings → Variables — not secrets):
 #   AWS_ROLE_ARN        (default: arn:aws:iam::673786334778:role/meridian-electronics-github-actions)
@@ -19,6 +22,9 @@
 #   ECS_SERVICE_NAME    (default: meridian-assistant-backend-svc)
 #   ECS_TASK_FAMILY     (default: meridian-assistant-backend)
 #   ECS_CONTAINER_NAME  (default: backend)
+#   ALLOWED_ORIGINS     (optional) Comma-separated CORS origins for the backend,
+#                       e.g. Terraform output amplify_origin_https. When set,
+#                       the deploy job updates that env var on the target container.
 
 name: deploy
 
@@ -111,13 +117,13 @@ jobs:
           docker push "${REPO_URL}:latest"
           echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
 
-      # Pull the current task definition, swap the image URI, then register a
-      # new revision. This preserves all other settings (CPU, memory, roles, etc.).
+      # Pull the current task definition, swap only the container image, then register a
+      # new revision. Preserves secrets[], environment, CPU, memory, roles, etc.
       - name: Register new ECS task definition revision
         id: taskdef
         env:
           IMAGE_URI: ${{ steps.image.outputs.image_uri }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
         run: |
           TASK_DEF_JSON=$(aws ecs describe-task-definition \
             --task-definition "${ECS_TASK_FAMILY}" \
@@ -127,12 +133,15 @@ jobs:
           NEW_TASK_DEF=$(echo "$TASK_DEF_JSON" | jq \
             --arg IMAGE_URI "$IMAGE_URI" \
             --arg CONTAINER "${ECS_CONTAINER_NAME}" \
-            --arg OAI "$OPENAI_API_KEY" \
+            --arg ALLOWED_ORIGINS "${ALLOWED_ORIGINS:-}" \
             '
               .containerDefinitions |= map(
                 if .name == $CONTAINER then
                   .image = $IMAGE_URI
-                  | .environment = ((.environment // [] | map(select(.name != "OPENAI_API_KEY"))) + [{"name":"OPENAI_API_KEY","value":$OAI}])
+                  | if ($ALLOWED_ORIGINS | length) > 0 then
+                      .environment = ((.environment // []) | map(select(.name != "ALLOWED_ORIGINS")) + [{"name":"ALLOWED_ORIGINS","value":$ALLOWED_ORIGINS}])
+                    else .
+                    end
                 else .
                 end
               )

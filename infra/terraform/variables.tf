@@ -16,11 +16,6 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-variable "backend_image_identifier" {
-  description = "Backend image URI for App Runner"
-  type        = string
-}
-
 variable "github_repository" {
   description = "GitHub repository URL for Amplify"
   type        = string
@@ -50,8 +45,19 @@ variable "jwt_secret" {
   sensitive   = true
 }
 
-variable "mcp_server_url" {
-  description = "MCP server endpoint"
+variable "ecs_backend_https_url" {
+  description = "Public HTTPS URL of the ECS load balancer (ALB) in front of the FastAPI service. No trailing slash. API Gateway HTTP proxies to this origin."
   type        = string
-  default     = "https://order-mcp-74afyau24q-uc.a.run.app/mcp"
+}
+
+variable "api_gateway_throttling_burst_limit" {
+  description = "HTTP API stage burst limit (default route)"
+  type        = number
+  default     = 100
+}
+
+variable "api_gateway_throttling_rate_limit" {
+  description = "HTTP API stage steady-state requests per second (default route)"
+  type        = number
+  default     = 50
 }
