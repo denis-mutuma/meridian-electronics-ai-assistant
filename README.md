@@ -37,7 +37,8 @@ npm install
 npm run dev
 ```
 
-4. Demo login credentials are listed in `testdata.md`.
+4. Use synthetic demo login credentials from `backend/app/services/demo_users.py`.
+	Example: `demo.customer1@example.com` / `1111`.
 
 ## Current MVP status
 
