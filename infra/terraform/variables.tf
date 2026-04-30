@@ -16,31 +16,8 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-variable "github_repository" {
-  description = "GitHub repository URL for Amplify"
-  type        = string
-}
-
-variable "github_token" {
-  description = "GitHub personal access token for Amplify webhook"
-  type        = string
-  sensitive   = true
-}
-
-variable "git_branch" {
-  description = "Branch for Amplify deployment"
-  type        = string
-  default     = "main"
-}
-
 variable "openai_api_key" {
-  description = "OpenAI API key"
-  type        = string
-  sensitive   = true
-}
-
-variable "jwt_secret" {
-  description = "JWT signing secret"
+  description = "OpenAI API key (stored in Secrets Manager for ECS to reference)"
   type        = string
   sensitive   = true
 }

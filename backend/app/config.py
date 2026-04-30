@@ -2,7 +2,7 @@
 config.py — Application settings loaded from environment variables.
 
 Priority order (highest first):
-  1. Real process environment (e.g. AWS App Runner runtime env)
+  1. Real process environment (e.g. AWS ECS runtime env)
   2. <repo_root>/.env         — primary local dev file (gitignored)
   3. <backend_dir>/.env       — optional backend-scoped overrides
   4. .env in the working directory (fallback)
@@ -43,11 +43,9 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
 
-    # ── Auth ─────────────────────────────────────────────────────────────────
-    # IMPORTANT: replace "change_me" with a long random value in production.
-    # Generate one with:  openssl rand -hex 32
-    jwt_secret: str = "change_me"
-    jwt_expires_minutes: int = 60
+    # ── Chat context ─────────────────────────────────────────────────────────
+    # Injected into the LLM/MCP context as the customer email (no login flow).
+    default_customer_email: str = "demo.customer1@example.com"
 
     # ── CORS ─────────────────────────────────────────────────────────────────
     # Comma-separated list of allowed origins for the CORS middleware.

@@ -4,68 +4,48 @@ A production-oriented MVP support assistant for Meridian Electronics.
 
 It provides:
 
-- Next.js chat frontend with login
-- FastAPI backend with JWT-protected chat endpoint
+- Next.js chat frontend (static export on **S3 + CloudFront**)
+- FastAPI backend with a **POST /chat** endpoint (no JWT; customer context uses `DEFAULT_CUSTOMER_EMAIL`)
 - OpenAI GPT-4o-mini for response generation and tool-calling
 - MCP integration for factual business tool lookups
-- AWS deployment: **Amplify** (frontend) → **API Gateway HTTP API** → **Application Load Balancer** → **ECS Fargate** (backend)
+- AWS deployment: **CloudFront** (UI) → **API Gateway HTTP API** → **ALB** → **ECS Fargate** (API)
 
 ## Architecture
 
 ```text
-Browser (Customer)
-        |
-        v
-Next.js Frontend (Amplify)
-        |
-        v
-Amazon API Gateway (HTTP API, throttling on $default stage)
-        |
-        v
-Application Load Balancer (HTTPS) ──► ECS Fargate (FastAPI)
-   |                                          |
-   v                                          v
-(optional WAF on API GW stage)          OpenAI + MCP server
+Browser
+   |
+   v
+Amazon CloudFront  --->  S3 bucket (Next.js static export)
+   |
+   |  (browser calls API)
+   v
+API Gateway (HTTP API)  --->  ALB  --->  ECS Fargate (FastAPI)
+                                    |
+                                    +-- OpenAI, MCP server
 ```
 
-Terraform in this repository provisions **ECR**, **Secrets Manager** secrets (OpenAI + JWT), **HTTP API Gateway** (proxy to your ALB), and **Amplify**. The **ECS cluster, service, task definition, and ALB** are expected to exist already (created in the console or separate IaC); set `ecs_backend_https_url` to the ALB’s public HTTPS URL (no trailing slash).
+Terraform provisions **ECR**, **Secrets Manager** (OpenAI key only), **HTTP API Gateway**, and **S3 + CloudFront** for the frontend. **ECS and the ALB** are expected to exist separately; set `ecs_backend_https_url` to the ALB HTTPS URL (no trailing slash).
 
-### Terraform outputs to wire manually
-
-After `terraform apply`, copy values into GitHub and ECS as needed:
+### Outputs to wire after `terraform apply`
 
 | Output | Use |
 |--------|-----|
-| `api_gateway_invoke_url` | Already injected into Amplify as `NEXT_PUBLIC_API_BASE_URL` |
-| `amplify_origin_https` | Set GitHub Actions variable `ALLOWED_ORIGINS` to this value (comma-separate if you add custom domains) so the ECS task CORS matches the real UI origin |
-| `openai_secret_arn` / `jwt_secret_arn` | ECS container `secrets` entries (see below) |
+| `frontend_url` / `frontend_origin_https` | Browser URL (`https://xxxx.cloudfront.net`); set **`ALLOWED_ORIGINS`** on ECS (or GitHub var) to this |
+| `api_gateway_invoke_url` | Set GitHub variable **`NEXT_PUBLIC_API_BASE_URL`** for CI builds |
+| `frontend_s3_bucket` | GitHub variable **`FRONTEND_S3_BUCKET`** |
+| `cloudfront_distribution_id` | GitHub variable **`CLOUDFRONT_DISTRIBUTION_ID`** |
+| `openai_secret_arn` | ECS task `secrets` for `OPENAI_API_KEY` |
 
-### ECS task definition: Secrets Manager
+### ECS task definition
 
-Store sensitive values in Secrets Manager (Terraform creates two secrets from `openai_api_key` and `jwt_secret` in `terraform.tfvars`). Point the **backend** container at them so deploy workflows never need the raw OpenAI key:
-
-```json
-"secrets": [
-  {
-    "name": "OPENAI_API_KEY",
-    "valueFrom": "<terraform output openai_secret_arn>"
-  },
-  {
-    "name": "JWT_SECRET",
-    "valueFrom": "<terraform output jwt_secret_arn>"
-  }
-]
-```
-
-The **ECS task execution role** must allow `secretsmanager:GetSecretValue` on those ARNs (and KMS decrypt if the secrets use a CMK).
-
-Other runtime env vars (`MCP_SERVER_URL`, etc.) stay in the task `environment` block as you maintain them today.
+Store **OpenAI** in Secrets Manager (Terraform creates the secret from `openai_api_key`). Point the container at `openai_secret_arn`. The GitHub Actions OIDC role needs **`s3:PutObject`**, **`s3:DeleteObject`**, **`s3:ListBucket`** on the frontend bucket, and **`cloudfront:CreateInvalidation`** on the distribution (in addition to existing ECR/ECS permissions).
 
 ## Repository layout
 
-- `backend/`: FastAPI app, auth, chat engine, LLM and MCP services, tests
-- `frontend/`: Next.js chat UI and API client ([`frontend/lib/api.ts`](frontend/lib/api.ts) uses `NEXT_PUBLIC_API_BASE_URL`)
-- `infra/terraform/`: AWS modules (`ecr`, `secrets`, `http_api_gateway`, `amplify`) and root wiring
+- `backend/`: FastAPI app, chat engine, LLM and MCP services, tests
+- `frontend/`: Next.js UI ([`frontend/lib/api.ts`](frontend/lib/api.ts) uses `NEXT_PUBLIC_API_BASE_URL`); **`output: 'export'`** writes to `frontend/out/`
+- `infra/terraform/`: AWS modules (`ecr`, `secrets`, `http_api_gateway`, `frontend_cloudfront`) and root wiring
 - `.github/workflows/`: CI and deployment automation
 
 ## Local setup
@@ -93,30 +73,22 @@ npm install
 npm run dev
 ```
 
-4. Sign in with synthetic demo credentials from `backend/app/services/demo_users.py`.
-   Local quick reference can be stored in `testdata.md` (gitignored).
+4. Open the app and use the chat box (no sign-in). Optional: set **`DEFAULT_CUSTOMER_EMAIL`** in `.env` for MCP/LLM customer context.
 
-## Secrets and variables
+## Terraform (`terraform.tfvars`)
 
-**Terraform (`terraform.tfvars`, not committed):** `openai_api_key`, `jwt_secret`, `github_token`, and `ecs_backend_https_url` (your ALB HTTPS URL).
+Required: `project_name`, `environment`, `aws_region`, `ecs_backend_https_url`, `openai_api_key`.
 
-**GitHub Actions:** No repository secret is strictly required for deploy if the ECS task loads OpenAI/JWT from Secrets Manager. Optional repository **variable** `ALLOWED_ORIGINS` should match `amplify_origin_https` (and any extra origins) so CORS is locked to your UI.
+Remove any leftover keys from older configs (**`github_repository`**, **`github_token`**, **`git_branch`**, **`jwt_secret`**) so Terraform does not warn about undeclared variables.
 
-Optional repository variables (defaults in [`deploy.yml`](.github/workflows/deploy.yml)):
+## GitHub Actions variables
 
-- `AWS_ROLE_ARN`, `AWS_REGION`, `ECR_REPO_NAME`, `ECS_CLUSTER_NAME`, `ECS_SERVICE_NAME`, `ECS_TASK_FAMILY`, `ECS_CONTAINER_NAME`
+Set **`NEXT_PUBLIC_API_BASE_URL`**, **`FRONTEND_S3_BUCKET`**, and **`CLOUDFRONT_DISTRIBUTION_ID`** from Terraform outputs so the **`deploy-frontend`** job runs (it is skipped until all three are non-empty). Optional **`ALLOWED_ORIGINS`** = `terraform output -raw frontend_origin_https` for CORS.
 
 ## Workflow model
 
-- [`ci.yml`](.github/workflows/ci.yml): pull requests and pushes to branches other than `main`; backend tests and frontend build; no AWS credentials.
-- [`deploy.yml`](.github/workflows/deploy.yml): push to `main` only; gates on tests/build; OIDC to AWS; ECR image build/push; new ECS task revision **image-only** (preserves secrets and the rest of the task definition); optional `ALLOWED_ORIGINS` variable merge; Amplify rebuilds via GitHub webhook.
-
-## Observability (recommended follow-ups)
-
-- Enable API Gateway access logging to CloudWatch Logs; add alarms on `4XXError`, `5XXError`, and integration latency.
-- Confirm the ALB target group health check uses `GET /health` (see [`backend/app/routes/health.py`](backend/app/routes/health.py)).
-- Associate **AWS WAF** with the API Gateway stage if you need IP or bot filtering.
-- Add an **ACM custom domain** on API Gateway if you want a stable hostname instead of `*.execute-api.*.amazonaws.com`.
+- [`ci.yml`](.github/workflows/ci.yml): PRs and non-`main` pushes; backend tests + frontend static build.
+- [`deploy.yml`](.github/workflows/deploy.yml): push to `main`; tests; **ECS** image deploy; **S3 sync + CloudFront invalidation** when the three frontend variables are set.
 
 ## Testing
 
@@ -127,10 +99,8 @@ uv run pytest -q
 
 ## MVP status
 
-- [x] FastAPI scaffold, auth, and protected chat endpoint
-- [x] Next.js chat UI with login
+- [x] FastAPI chat endpoint and health check
+- [x] Next.js chat UI
 - [x] MCP tool discovery and execution loop
-- [x] GPT-4o-mini prompt and tool-calling orchestration
-- [x] AWS deploy pipeline with push-to-main deploy
-- [x] API Gateway in front of ECS ALB; Amplify uses gateway URL
-- [x] Simplified CI/CD with minimal secret surface (Secrets Manager for runtime secrets)
+- [x] GPT-4o-mini orchestration
+- [x] AWS: API Gateway, ECS deploy, S3 + CloudFront frontend, Secrets Manager for OpenAI

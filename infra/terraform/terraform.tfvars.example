@@ -1,11 +1,13 @@
-# Copy to terraform.tfvars and replace placeholder values.
+# Copy to terraform.tfvars and replace placeholders.
 
-project_name             = "meridian-electronics-ai-assistant"
-environment              = "dev"
-aws_region               = "us-east-1"
-ecs_backend_https_url    = "https://meridian-assistant-alb-123456789.us-east-1.elb.amazonaws.com"
-github_repository        = "https://github.com/your-org/meridian-electronics-ai-assistant"
-github_token             = "ghp_replace_me"
-git_branch               = "main"
-openai_api_key           = "sk-replace_me"
-jwt_secret               = "replace_with_long_random_secret"
+project_name          = "meridian-electronics-ai-assistant"
+environment           = "dev"
+aws_region            = "us-east-1"
+ecs_backend_https_url = "https://your-alb.us-east-1.elb.amazonaws.com"
+openai_api_key        = "sk-replace_me"
+
+# After apply, set GitHub Actions variables (see README):
+#   NEXT_PUBLIC_API_BASE_URL  = terraform output api_gateway_invoke_url
+#   FRONTEND_S3_BUCKET        = terraform output frontend_s3_bucket
+#   CLOUDFRONT_DISTRIBUTION_ID = terraform output cloudfront_distribution_id
+#   ALLOWED_ORIGINS           = terraform output frontend_origin_https

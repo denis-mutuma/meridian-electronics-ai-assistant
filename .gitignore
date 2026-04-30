@@ -21,4 +21,10 @@ terraform.tfstate
 terraform.tfstate.*
 .terraform/
 .terraform.lock.hcl
+
+# Terraform secrets (use terraform.tfvars.example only in git)
+infra/terraform/terraform.tfvars
+
+# Local Git hooks (optional; not part of the shared repo)
+.githooks/
 package-lock.json

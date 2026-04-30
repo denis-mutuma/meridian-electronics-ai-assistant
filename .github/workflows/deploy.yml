@@ -1,30 +1,19 @@
 # deploy.yml — runs only when commits land on the main branch.
 #
 # What it does:
-#   1. Runs backend tests and frontend build (gate before any AWS work).
-#   2. Builds and pushes the backend Docker image to Amazon ECR.
-#   3. Registers a new ECS task definition revision with the new image only
-#      (secrets, environment keys, and Secrets Manager references are preserved).
-#   4. Updates the ECS Fargate service and waits for it to stabilise.
-#   5. AWS Amplify picks up the main-branch push automatically via its
-#      GitHub webhook — no extra step is needed here.
+#   1. Runs backend tests and frontend static build (gate before any AWS work).
+#   2. Builds and pushes the backend Docker image to Amazon ECR; updates ECS.
+#   3. Syncs the static Next.js export (out/) to S3 and invalidates CloudFront.
 #
-# Secrets (OPENAI_API_KEY, JWT_SECRET) should be supplied to tasks via the ECS
-# task definition `secrets` block pointing at Secrets Manager ARNs (see README).
-# Optional GitHub secret OPENAI_API_KEY is no longer written into the task by
-# this workflow.
+# ECS should load OPENAI_API_KEY from Secrets Manager (see README). Optional
+# GitHub variable ALLOWED_ORIGINS should match your CloudFront URL for CORS.
 #
-# Repository-level variables (Settings → Variables — not secrets):
-#   AWS_ROLE_ARN        (default: arn:aws:iam::673786334778:role/meridian-electronics-github-actions)
-#   AWS_REGION          (default: us-east-1)
-#   ECR_REPO_NAME       (default: meridian-electronics-ai-assistant-dev-backend)
-#   ECS_CLUSTER_NAME    (default: meridian-assistant-cluster)
-#   ECS_SERVICE_NAME    (default: meridian-assistant-backend-svc)
-#   ECS_TASK_FAMILY     (default: meridian-assistant-backend)
-#   ECS_CONTAINER_NAME  (default: backend)
-#   ALLOWED_ORIGINS     (optional) Comma-separated CORS origins for the backend,
-#                       e.g. Terraform output amplify_origin_https. When set,
-#                       the deploy job updates that env var on the target container.
+# Repository variables (Settings → Variables):
+#   AWS_ROLE_ARN, AWS_REGION, ECR_*, ECS_*, CONTAINER_NAME (see env block)
+#   NEXT_PUBLIC_API_BASE_URL — API Gateway URL (same as terraform output api_gateway_invoke_url)
+#   FRONTEND_S3_BUCKET       — terraform output frontend_s3_bucket
+#   CLOUDFRONT_DISTRIBUTION_ID — terraform output cloudfront_distribution_id
+#   ALLOWED_ORIGINS          — optional; terraform output frontend_origin_https
 
 name: deploy
 
@@ -32,7 +21,6 @@ on:
   push:
     branches: [main]
 
-# OIDC token is required for keyless AWS authentication.
 permissions:
   id-token: write
   contents: read
@@ -47,7 +35,6 @@ env:
   ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME || 'backend' }}
 
 jobs:
-  # ── Gate: tests must pass before any AWS work begins ──────────────────────
   test:
     runs-on: ubuntu-latest
     steps:
@@ -70,27 +57,26 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Build frontend (compilation check)
+      - name: Build frontend (static export)
+        env:
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000' }}
         run: |
           cd frontend
           npm ci
           npm run build
 
-  # ── Deploy: build image → push to ECR → update ECS Fargate service ────────
   deploy:
     needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Authenticate to AWS using OIDC — no long-lived access keys needed.
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Derive the full ECR repository URL from the AWS account ID.
       - name: Resolve ECR repository URL
         id: ecr
         run: |
@@ -98,11 +84,9 @@ jobs:
           REPO_URL="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}"
           echo "repo_url=${REPO_URL}" >> "$GITHUB_OUTPUT"
 
-      # Log in to ECR so Docker can push.
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # Build and tag the image with the commit SHA for traceability.
       - name: Build and push backend Docker image
         id: image
         env:
@@ -112,13 +96,10 @@ jobs:
           IMAGE_URI="${REPO_URL}:${IMAGE_TAG}"
           docker build -t "${IMAGE_URI}" backend/
           docker push "${IMAGE_URI}"
-          # Also tag as :latest for convenience.
           docker tag "${IMAGE_URI}" "${REPO_URL}:latest"
           docker push "${REPO_URL}:latest"
           echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
 
-      # Pull the current task definition, swap only the container image, then register a
-      # new revision. Preserves secrets[], environment, CPU, memory, roles, etc.
       - name: Register new ECS task definition revision
         id: taskdef
         env:
@@ -155,7 +136,6 @@ jobs:
 
           echo "task_definition_arn=${TASK_DEF_ARN}" >> "$GITHUB_OUTPUT"
 
-      # Point the ECS service to the new task definition revision.
       - name: Update ECS service
         run: |
           aws ecs update-service \
@@ -164,9 +144,48 @@ jobs:
             --task-definition "${{ steps.taskdef.outputs.task_definition_arn }}" \
             --force-new-deployment
 
-      # Block until all tasks in the service are healthy and running the new revision.
       - name: Wait for ECS service stability
         run: |
           aws ecs wait services-stable \
             --cluster "${ECS_CLUSTER_NAME}" \
             --services "${ECS_SERVICE_NAME}"
+
+  deploy-frontend:
+    # Skip until Terraform outputs are copied into repo variables (see README).
+    if: ${{ vars.FRONTEND_S3_BUCKET != '' && vars.CLOUDFRONT_DISTRIBUTION_ID != '' && vars.NEXT_PUBLIC_API_BASE_URL != '' }}
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build static site
+        env:
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Sync to S3
+        env:
+          BUCKET: ${{ vars.FRONTEND_S3_BUCKET }}
+        run: |
+          aws s3 sync frontend/out "s3://${BUCKET}/" --delete
+
+      - name: Invalidate CloudFront
+        env:
+          DIST_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${DIST_ID}" \
+            --paths "/*"
