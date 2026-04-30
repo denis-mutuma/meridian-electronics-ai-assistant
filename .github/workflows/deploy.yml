@@ -28,7 +28,7 @@ permissions:
   contents: read
 
 env:
-  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::673786334778:role/fleet-health-copilot-prod-github-actions' }}
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::673786334778:role/meridian-electronics-github-actions' }}
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   # ECR repo name must match the name created by Terraform (project_name-environment-backend).
   ECR_REPO_NAME: ${{ vars.ECR_REPO_NAME || 'meridian-electronics-ai-assistant-dev-backend' }}
