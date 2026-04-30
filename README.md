@@ -62,15 +62,14 @@ npm run dev
 
 ## Minimal secrets for GitHub Actions
 
-Only three repository secrets are required:
+Only one repository secret is required:
 
-- `AWS_ROLE_TO_ASSUME`: IAM role ARN for GitHub OIDC deployment access
 - `OPENAI_API_KEY`: API key used by the backend runtime
-- `JWT_SECRET`: secret for backend token signing
 
 Optional repository variables (with defaults in workflow):
 
-- `AWS_REGION` (default `eu-west-1`)
+- `AWS_ROLE_ARN` (default: the provisioned GitHub Actions IAM role ARN)
+- `AWS_REGION` (default `us-east-1`)
 - `ECR_REPO_NAME` (default `meridian-electronics-ai-assistant-dev-backend`)
 - `APP_RUNNER_SERVICE_NAME` (default `meridian-electronics-ai-assistant-dev-backend`)
 

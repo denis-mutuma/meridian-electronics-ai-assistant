@@ -8,11 +8,10 @@
 #      GitHub webhook — no extra step is needed here.
 #
 # Required GitHub Actions secrets (Settings → Secrets → Actions):
-#   AWS_ROLE_TO_ASSUME  — ARN of the IAM role to assume via OIDC
 #   OPENAI_API_KEY      — injected into the App Runner service env
-#   JWT_SECRET          — injected into the App Runner service env
 #
 # Repository-level variables (Settings → Variables — not secrets):
+#   AWS_ROLE_ARN           (default: arn:aws:iam::673786334778:role/fleet-health-copilot-prod-github-actions)
 #   AWS_REGION             (default: us-east-1)
 #   ECR_REPO_NAME          (default: meridian-electronics-ai-assistant-dev-backend)
 #   APP_RUNNER_SERVICE_NAME (default: meridian-electronics-ai-assistant-dev-backend)
@@ -29,6 +28,7 @@ permissions:
   contents: read
 
 env:
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::673786334778:role/fleet-health-copilot-prod-github-actions' }}
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   # ECR repo name must match the name created by Terraform (project_name-environment-backend).
   ECR_REPO_NAME: ${{ vars.ECR_REPO_NAME || 'meridian-electronics-ai-assistant-dev-backend' }}
@@ -76,7 +76,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       # Derive the full ECR repository URL from the AWS account ID.
@@ -132,11 +132,9 @@ jobs:
           NEW_SOURCE=$(echo "$SOURCE_CONFIG" | \
             jq --arg img "${IMAGE_URI}" \
                --arg oai "${{ secrets.OPENAI_API_KEY }}" \
-               --arg jwt "${{ secrets.JWT_SECRET }}" \
             '
               .ImageRepository.ImageIdentifier = $img |
-              .ImageRepository.ImageConfiguration.RuntimeEnvironmentVariables.OPENAI_API_KEY = $oai |
-              .ImageRepository.ImageConfiguration.RuntimeEnvironmentVariables.JWT_SECRET = $jwt
+              .ImageRepository.ImageConfiguration.RuntimeEnvironmentVariables.OPENAI_API_KEY = $oai
             ')
 
           aws apprunner update-service \
