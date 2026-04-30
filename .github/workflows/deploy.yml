@@ -11,7 +11,7 @@
 #   OPENAI_API_KEY      — injected into the App Runner service env
 #
 # Repository-level variables (Settings → Variables — not secrets):
-#   AWS_ROLE_ARN           (default: arn:aws:iam::673786334778:role/fleet-health-copilot-prod-github-actions)
+#   AWS_ROLE_ARN           (default: arn:aws:iam::673786334778:role/meridian-electronics-github-actions)
 #   AWS_REGION             (default: us-east-1)
 #   ECR_REPO_NAME          (default: meridian-electronics-ai-assistant-dev-backend)
 #   APP_RUNNER_SERVICE_NAME (default: meridian-electronics-ai-assistant-dev-backend)
