@@ -1,3 +1,14 @@
+"""
+services/demo_users.py — In-memory demo credential store.
+
+This is an MVP substitute for a real user database.
+The same credentials are listed in testdata.md for easy reference.
+
+Format:  { "email": "4-digit-pin" }
+"""
+
+# Demo login credentials.
+# See testdata.md for a formatted reference table.
 DEMO_USERS: dict[str, str] = {
     "demo.customer1@example.com": "1111",
     "demo.customer2@example.com": "2222",

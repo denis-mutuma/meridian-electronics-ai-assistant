@@ -10,9 +10,12 @@ type Message = {
 };
 
 export default function ChatClient() {
+  // Login/session state.
   const [email, setEmail] = useState("");
   const [pin, setPin] = useState("");
   const [token, setToken] = useState("");
+
+  // Chat interaction state.
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
@@ -35,6 +38,7 @@ export default function ChatClient() {
       return;
     }
 
+    // Optimistically append the customer message before waiting for the reply.
     const message = input.trim();
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: message }]);

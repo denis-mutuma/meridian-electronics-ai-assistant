@@ -1,0 +1,146 @@
+# deploy.yml — runs only when commits land on the main branch.
+#
+# What it does:
+#   1. Runs backend tests and frontend build (gate before any AWS work).
+#   2. Builds and pushes the backend Docker image to Amazon ECR.
+#   3. Updates the App Runner service to use the new image.
+#   4. AWS Amplify picks up the main-branch push automatically via its
+#      GitHub webhook — no extra step is needed here.
+#
+# Required GitHub Actions secrets (Settings → Secrets → Actions):
+#   AWS_ROLE_TO_ASSUME  — ARN of the IAM role to assume via OIDC
+#   OPENAI_API_KEY      — injected into the App Runner service env
+#   JWT_SECRET          — injected into the App Runner service env
+#
+# Repository-level variables (Settings → Variables — not secrets):
+#   AWS_REGION             (default: us-east-1)
+#   ECR_REPO_NAME          (default: meridian-electronics-ai-assistant-dev-backend)
+#   APP_RUNNER_SERVICE_NAME (default: meridian-electronics-ai-assistant-dev-backend)
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+# OIDC token is required for keyless AWS authentication.
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  # ECR repo name must match the name created by Terraform (project_name-environment-backend).
+  ECR_REPO_NAME: ${{ vars.ECR_REPO_NAME || 'meridian-electronics-ai-assistant-dev-backend' }}
+  # App Runner service name must also match the Terraform-created service.
+  APP_RUNNER_SERVICE_NAME: ${{ vars.APP_RUNNER_SERVICE_NAME || 'meridian-electronics-ai-assistant-dev-backend' }}
+
+jobs:
+  # ── Gate: tests must pass before any AWS work begins ──────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Run backend tests
+        run: |
+          cd backend
+          uv sync
+          uv run pytest -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend (compilation check)
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+  # ── Deploy: build image → push to ECR → update App Runner ─────────────────
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Authenticate to AWS using OIDC — no long-lived access keys needed.
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Derive the full ECR repository URL from the AWS account ID.
+      - name: Resolve ECR repository URL
+        id: ecr
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REPO_URL="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}"
+          echo "repo_url=${REPO_URL}" >> "$GITHUB_OUTPUT"
+
+      # Log in to ECR so Docker can push.
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Build and tag the image with the commit SHA for traceability.
+      - name: Build and push backend Docker image
+        id: image
+        env:
+          REPO_URL: ${{ steps.ecr.outputs.repo_url }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI="${REPO_URL}:${IMAGE_TAG}"
+          docker build -t "${IMAGE_URI}" backend/
+          docker push "${IMAGE_URI}"
+          # Also tag as :latest for convenience.
+          docker tag "${IMAGE_URI}" "${REPO_URL}:latest"
+          docker push "${REPO_URL}:latest"
+          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
+
+      # Look up the App Runner service ARN by name — avoids storing it as a secret.
+      - name: Update App Runner service
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+        run: |
+          # Resolve service ARN from the service name.
+          SERVICE_ARN=$(aws apprunner list-services \
+            --query "ServiceSummaryList[?ServiceName=='${APP_RUNNER_SERVICE_NAME}'].ServiceArn | [0]" \
+            --output text)
+
+          if [ -z "$SERVICE_ARN" ] || [ "$SERVICE_ARN" = "None" ]; then
+            echo "ERROR: App Runner service '${APP_RUNNER_SERVICE_NAME}' not found."
+            echo "Run Terraform first to provision infrastructure."
+            exit 1
+          fi
+
+          # Fetch the current source configuration and patch only the image identifier.
+          # This preserves all other settings (env vars, instance config, etc.).
+          SOURCE_CONFIG=$(aws apprunner describe-service \
+            --service-arn "$SERVICE_ARN" \
+            --query 'Service.SourceConfiguration' \
+            --output json)
+
+          NEW_SOURCE=$(echo "$SOURCE_CONFIG" | \
+            jq --arg img "${IMAGE_URI}" \
+               --arg oai "${{ secrets.OPENAI_API_KEY }}" \
+               --arg jwt "${{ secrets.JWT_SECRET }}" \
+            '
+              .ImageRepository.ImageIdentifier = $img |
+              .ImageRepository.ImageConfiguration.RuntimeEnvironmentVariables.OPENAI_API_KEY = $oai |
+              .ImageRepository.ImageConfiguration.RuntimeEnvironmentVariables.JWT_SECRET = $jwt
+            ')
+
+          aws apprunner update-service \
+            --service-arn "$SERVICE_ARN" \
+            --source-configuration "$NEW_SOURCE"
+
+          echo "App Runner service updated to image: ${IMAGE_URI}"
