@@ -1,30 +1,24 @@
-"""
-routes/chat.py — Chat endpoint.
-
-POST /chat — accepts a user message and returns the assistant reply after
-running the agentic tool loop. Customer context uses default_customer_email
-from configuration (no JWT).
-"""
-
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.models import ChatRequest, ChatResponse
 from app.services.chat_engine import ChatEngine
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-def get_chat_engine(request: Request) -> ChatEngine:
-    """
-    Dependency: retrieve the ChatEngine instance from app.state.
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
 
-    The engine is attached during startup (see main.py lifespan).
-    Raises 503 if startup failed to initialise it.
-    """
+
+class ChatResponse(BaseModel):
+    reply: str
+
+
+def get_chat_engine(request: Request) -> ChatEngine:
     chat_engine = getattr(request.app.state, "chat_engine", None)
     if chat_engine is None:
         raise HTTPException(status_code=503, detail="Chat engine unavailable")
@@ -36,7 +30,6 @@ async def chat(
     payload: ChatRequest,
     chat_engine: ChatEngine = Depends(get_chat_engine),
 ) -> ChatResponse:
-    """Send a message to the AI assistant."""
     try:
         reply = await chat_engine.respond(settings.default_customer_email, payload.message)
     except Exception as exc:
