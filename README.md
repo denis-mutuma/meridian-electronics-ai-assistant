@@ -75,6 +75,12 @@ npm run dev
 
 4. Open the app and use the chat box (no sign-in). Optional: set **`DEFAULT_CUSTOMER_EMAIL`** in `.env` for MCP/LLM customer context.
 
+### Local demo credential contract
+
+- The local source of demo credential truth is [testdata.md](testdata.md).
+- Backend startup validates the format and verifies that demo.customer10@example.com maps to PIN 1234.
+- Because MCP is external to this repository, this app can validate local compatibility but cannot enforce the external server's internal dataset.
+
 ## Terraform (`terraform.tfvars`)
 
 Required: `project_name`, `environment`, `aws_region`, `ecs_backend_https_url`, `openai_api_key`.

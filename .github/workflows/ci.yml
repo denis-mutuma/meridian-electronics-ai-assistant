@@ -1,5 +1,3 @@
-# Runs on pull requests and on pushes to configured branches (except main is
-# covered by deploy.yml on push). Validates backend tests and frontend build.
 name: ci
 
 on:
