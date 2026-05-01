@@ -74,6 +74,42 @@ jobs:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Ensure ECS execution role can read OpenAI secret
+        env:
+          OPENAI_SECRET_ARN: ${{ env.OPENAI_SECRET_ARN }}
+        run: |
+          set -euo pipefail
+
+          TASK_DEF_JSON=$(aws ecs describe-task-definition \
+            --task-definition "${ECS_TASK_FAMILY}" \
+            --query taskDefinition \
+            --output json)
+
+          EXEC_ROLE_ARN=$(echo "$TASK_DEF_JSON" | jq -r '.executionRoleArn // empty')
+          if [ -z "$EXEC_ROLE_ARN" ]; then
+            echo "::warning::Task definition ${ECS_TASK_FAMILY} has no executionRoleArn. Skipping secret policy attachment."
+            exit 0
+          fi
+
+          EXEC_ROLE_NAME="${EXEC_ROLE_ARN##*/}"
+          SECRET_POLICY_DOC=$(jq -n --arg SECRET_ARN "$OPENAI_SECRET_ARN" '{
+            Version: "2012-10-17",
+            Statement: [
+              {
+                Effect: "Allow",
+                Action: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
+                Resource: [$SECRET_ARN, ($SECRET_ARN + "*")]
+              }
+            ]
+          }')
+
+          aws iam put-role-policy \
+            --role-name "$EXEC_ROLE_NAME" \
+            --policy-name "AllowOpenAISecretRead" \
+            --policy-document "$SECRET_POLICY_DOC"
+
+          echo "Execution role $EXEC_ROLE_NAME is allowed to read $OPENAI_SECRET_ARN"
+
       - name: Resolve ECR repository URL
         id: ecr
         run: |

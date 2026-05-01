@@ -104,6 +104,19 @@ data "aws_iam_policy_document" "permissions" {
     ]
   }
 
+  statement {
+    sid    = "IAMManageInlineRolePolicy"
+    effect = "Allow"
+    actions = [
+      "iam:PutRolePolicy",
+      "iam:GetRole",
+      "iam:GetRolePolicy",
+    ]
+    resources = [
+      "arn:aws:iam::${local.account_id}:role/*",
+    ]
+  }
+
   # IAM PassRole – required when registering an ECS task definition that
   # references a task execution role or task role
   statement {
