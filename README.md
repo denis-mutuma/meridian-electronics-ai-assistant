@@ -1,108 +1,113 @@
 # Meridian Electronics AI Assistant
 
-A production-oriented MVP support assistant for Meridian Electronics.
-
-It provides:
-
-- Next.js chat frontend (static export on **S3 + CloudFront**)
-- FastAPI backend with a **POST /chat** endpoint (no JWT; customer email is provided per request)
-- OpenAI GPT-4o-mini for response generation and tool-calling
-- MCP integration for factual business tool lookups
-- AWS deployment: **CloudFront** (UI) → **API Gateway HTTP API** → **ALB** → **ECS Fargate** (API)
+A customer support chat assistant for Meridian Electronics. Customers enter their email, then ask questions about their orders, products, and account. The backend fetches real data from an MCP server and generates responses with GPT-4o-mini.
 
 ## Architecture
 
-```text
+```
 Browser
-   |
-   v
-Amazon CloudFront  --->  S3 bucket (Next.js static export)
-   |
-   |  (browser calls API)
-   v
-API Gateway (HTTP API)  --->  ALB  --->  ECS Fargate (FastAPI)
-                                    |
-                                    +-- OpenAI, MCP server
+  │
+  ▼
+CloudFront ──► S3 (Next.js static export)
+  │
+  │  (API calls)
+  ▼
+API Gateway (HTTP API)
+  │
+  ▼
+ALB
+  │
+  ▼
+ECS Fargate (FastAPI, port 8000)
+  │
+  ├── OpenAI GPT-4o-mini
+  └── MCP server (order/customer data)
 ```
 
-Terraform provisions **ECR**, **Secrets Manager** (OpenAI key only), **HTTP API Gateway**, and **S3 + CloudFront** for the frontend. **ECS and the ALB** are expected to exist separately; set `ecs_backend_https_url` to the ALB HTTPS URL (no trailing slash).
+## Stack
 
-### Outputs to wire after `terraform apply`
+- **Frontend**: Next.js 14 (static export) → S3 + CloudFront
+- **Backend**: FastAPI (Python 3.12) on ECS Fargate
+- **AI**: GPT-4o-mini via OpenAI API
+- **Data**: External MCP server — all customer and order data lives there, not in this repo
+- **Infra**: Terraform — ECR, Secrets Manager, API Gateway, ALB, S3, CloudFront, GitHub OIDC IAM
 
-| Output | Use |
-|--------|-----|
-| `frontend_url` / `frontend_origin_https` | Browser URL (`https://xxxx.cloudfront.net`); set **`ALLOWED_ORIGINS`** on ECS (or GitHub var) to this |
-| `api_gateway_invoke_url` | Set GitHub variable **`NEXT_PUBLIC_API_BASE_URL`** for CI builds |
-| `frontend_s3_bucket` | GitHub variable **`FRONTEND_S3_BUCKET`** |
-| `cloudfront_distribution_id` | GitHub variable **`CLOUDFRONT_DISTRIBUTION_ID`** |
-| `openai_secret_arn` | GitHub variable or secret **`OPENAI_SECRET_ARN`** consumed by the deploy workflow to inject `OPENAI_API_KEY` into ECS |
+## Local development
 
-### ECS task definition
+**Prerequisites**: Python 3.12+, `uv`, Node.js 18+
 
-Store **OpenAI** in Secrets Manager (Terraform creates the secret from `openai_api_key`). The deploy workflow injects that secret into the ECS task definition automatically from **`OPENAI_SECRET_ARN`**. The GitHub Actions OIDC role needs **`s3:PutObject`**, **`s3:DeleteObject`**, **`s3:ListBucket`** on the frontend bucket, and **`cloudfront:CreateInvalidation`** on the distribution (in addition to existing ECR/ECS permissions).
-
-## Repository layout
-
-- `backend/`: FastAPI app, chat engine, LLM and MCP services, tests
-- `frontend/`: Next.js UI ([`frontend/lib/api.ts`](frontend/lib/api.ts) uses `NEXT_PUBLIC_API_BASE_URL`); **`output: 'export'`** writes to `frontend/out/`
-- `infra/terraform/`: AWS modules (`ecr`, `secrets`, `http_api_gateway`, `frontend_cloudfront`) and root wiring
-- `.github/workflows/`: CI and deployment automation
-
-## Local setup
-
-1. Copy environment values.
-
+1. Copy env file and set `OPENAI_API_KEY`:
 ```bash
 cp .env.example .env
-cp frontend/.env.local.example frontend/.env.local
 ```
 
-2. Start backend.
-
+2. Start the backend:
 ```bash
 cd backend
 uv sync
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uv run uvicorn app.main:app --reload
 ```
 
-3. Start frontend.
-
+3. Start the frontend:
 ```bash
 cd frontend
 npm install
-npm run dev
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 npm run dev
 ```
 
-4. Open the app and use the chat box. Enter the customer email in the UI; customer verification and order data checks happen via MCP server tools.
+4. Open http://localhost:3000, enter any customer email, and start chatting.
 
-## Terraform (`terraform.tfvars`)
+## API
 
-Required: `project_name`, `environment`, `aws_region`, `ecs_backend_https_url`, `openai_api_key`.
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check |
+| `POST` | `/chat` | Send a message |
 
-`ecs_backend_https_url` must be the HTTPS ALB origin, for example `https://your-alb.us-east-1.elb.amazonaws.com`. Do not point it at the API Gateway `execute-api` URL.
+`POST /chat` body:
+```json
+{ "customer_email": "user@example.com", "message": "Where is my order?" }
+```
 
-Remove any leftover keys from older configs (**`github_repository`**, **`github_token`**, **`git_branch`**, **`jwt_secret`**) so Terraform does not warn about undeclared variables.
-
-## GitHub Actions variables
-
-Set **`NEXT_PUBLIC_API_BASE_URL`**, **`FRONTEND_S3_BUCKET`**, **`CLOUDFRONT_DISTRIBUTION_ID`**, and **`OPENAI_SECRET_ARN`** from Terraform outputs so the deploy workflows can complete. Optional **`ALLOWED_ORIGINS`** = `terraform output -raw frontend_origin_https` for CORS.
-
-## Workflow model
-
-- [`ci.yml`](.github/workflows/ci.yml): PRs and non-`main` pushes; backend tests + frontend static build.
-- [`deploy.yml`](.github/workflows/deploy.yml): push to `main`; tests; **ECS** image deploy with automatic OpenAI secret injection; **S3 sync + CloudFront invalidation**. The workflow fails fast if required GitHub variables are missing.
-
-## Testing
+## Tests
 
 ```bash
 cd backend
 uv run pytest -q
 ```
 
-## MVP status
+## Infrastructure
 
-- [x] FastAPI chat endpoint and health check
-- [x] Next.js chat UI
-- [x] MCP tool discovery and execution loop
-- [x] GPT-4o-mini orchestration
-- [x] AWS: API Gateway, ECS deploy, S3 + CloudFront frontend, Secrets Manager for OpenAI
+Terraform manages: ECR, Secrets Manager (OpenAI key), API Gateway, ALB, S3, CloudFront, and the GitHub OIDC IAM role.
+
+The ECS cluster/service and VPC are pre-existing. Their IDs are hardcoded in `infra/terraform/main.tf` under the `alb` module.
+
+### First-time setup
+
+1. Copy and fill in `terraform.tfvars`:
+```bash
+cp infra/terraform/terraform.tfvars.example infra/terraform/terraform.tfvars
+```
+Set `openai_api_key`. Set `create_github_oidc_provider = false` if one already exists in the account.
+
+2. Apply:
+```bash
+cd infra/terraform
+terraform init
+terraform apply
+```
+
+3. Set these GitHub Actions variables from the Terraform outputs:
+
+| GitHub Variable | Terraform Output |
+|----------------|-----------------|
+| `NEXT_PUBLIC_API_BASE_URL` | `api_gateway_invoke_url` |
+| `FRONTEND_S3_BUCKET` | `frontend_s3_bucket` |
+| `CLOUDFRONT_DISTRIBUTION_ID` | `cloudfront_distribution_id` |
+| `OPENAI_SECRET_ARN` | `openai_secret_arn` |
+| `ALLOWED_ORIGINS` | `frontend_origin_https` |
+
+## CI/CD
+
+- **`ci.yml`**: Runs on PRs — backend tests + frontend build
+- **`deploy.yml`**: Runs on push to `main` — builds and pushes Docker image to ECR, updates ECS service, syncs frontend to S3, invalidates CloudFront

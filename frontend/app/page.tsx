@@ -10,6 +10,9 @@ type Message = {
 };
 
 export default function HomePage() {
+  // Email gate: the user must confirm their email before entering the chat.
+  // The email is not stored in a session or cookie — it is passed as a plain
+  // field on every request so the backend can look up the customer's data.
   const [email, setEmail] = useState("");
   const [emailConfirmed, setEmailConfirmed] = useState(false);
   const [input, setInput] = useState("");
@@ -37,6 +40,8 @@ export default function HomePage() {
     setError("");
 
     try {
+      // Pass the confirmed email on every message — the backend uses it to
+      // scope MCP tool calls to the correct customer.
       const reply = await sendChat(email, message);
       setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
     } catch {
@@ -46,6 +51,7 @@ export default function HomePage() {
     }
   };
 
+  // Screen 1: email gate
   if (!emailConfirmed) {
     return (
       <main style={{ maxWidth: 480, margin: "80px auto", padding: 24 }}>
@@ -66,6 +72,7 @@ export default function HomePage() {
     );
   }
 
+  // Screen 2: chat
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
       <h1>Meridian Electronics Assistant</h1>

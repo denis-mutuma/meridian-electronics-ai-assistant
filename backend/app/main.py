@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Connect to the MCP server and discover available tools at startup.
+    # If the MCP server is unreachable, the app still starts — tool calls
+    # will simply return errors at chat time rather than blocking startup.
     mcp_client = MCPClient(settings.mcp_server_url)
     tool_cache = ToolCache()
     llm_service = LLMService()
@@ -29,12 +32,16 @@ async def lifespan(app: FastAPI):
         logger.warning("MCP tool discovery failed at startup: %s", exc)
         await tool_cache.set_tools([])
 
+    # Attach the chat engine to app.state so route handlers can access it
+    # via request.app.state.chat_engine without using global variables.
     app.state.chat_engine = ChatEngine(mcp_client, tool_cache, llm_service)
     yield
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
+# Allow requests from the frontend origin. ALLOWED_ORIGINS is a comma-separated
+# list injected by ECS at runtime (set to the CloudFront URL in production).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.allowed_origins.split(",") if o.strip()],

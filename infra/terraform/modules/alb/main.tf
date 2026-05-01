@@ -1,4 +1,6 @@
 locals {
+  # If a name was explicitly provided (e.g. for import compatibility), use it;
+  # otherwise derive one from name_prefix.
   alb_sg_name = var.alb_sg_name != "" ? var.alb_sg_name : "${var.name_prefix}-alb-sg"
 }
 
@@ -7,6 +9,7 @@ resource "aws_security_group" "alb" {
   description = var.alb_sg_description
   vpc_id      = var.vpc_id
 
+  # Allow inbound HTTP traffic from the internet.
   ingress {
     from_port   = 80
     to_port     = 80
@@ -21,6 +24,9 @@ resource "aws_security_group" "alb" {
   }
 }
 
+# Attach an ingress rule to the pre-existing ECS security group that allows
+# traffic from the ALB on the container port. This is added as a separate
+# rule resource (not inline) to avoid modifying the existing SG definition.
 resource "aws_security_group_rule" "alb_to_ecs" {
   type                     = "ingress"
   from_port                = var.container_port
@@ -38,6 +44,8 @@ resource "aws_lb" "this" {
   security_groups    = [aws_security_group.alb.id]
 }
 
+# Target group uses IP type so ECS Fargate tasks (which have no stable
+# instance ID) can register themselves directly.
 resource "aws_lb_target_group" "this" {
   name        = "${var.name_prefix}-tg"
   port        = var.container_port

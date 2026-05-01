@@ -10,6 +10,8 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 class ChatRequest(BaseModel):
+    # customer_email is collected in the frontend UI and sent with every request.
+    # There is no session or JWT — identity is per-request.
     customer_email: str = Field(min_length=1, max_length=254)
     message: str = Field(min_length=1, max_length=2000)
 
@@ -19,6 +21,8 @@ class ChatResponse(BaseModel):
 
 
 def get_chat_engine(request: Request) -> ChatEngine:
+    # The chat engine is attached to app.state during startup (see main.py lifespan).
+    # Return 503 if startup failed so the client gets a clear error.
     chat_engine = getattr(request.app.state, "chat_engine", None)
     if chat_engine is None:
         raise HTTPException(status_code=503, detail="Chat engine unavailable")

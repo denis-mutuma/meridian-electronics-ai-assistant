@@ -7,6 +7,9 @@ resource "aws_apigatewayv2_api" "this" {
   protocol_type = "HTTP"
 }
 
+# Two integrations are required:
+# - proxy: handles all paths except root (e.g. /chat, /health)
+# - root:  handles bare "/" requests (used by API Gateway health probes)
 resource "aws_apigatewayv2_integration" "proxy" {
   api_id             = aws_apigatewayv2_api.this.id
   integration_type   = "HTTP_PROXY"

@@ -32,6 +32,8 @@ Guidelines:
 
 class LLMService:
     def __init__(self) -> None:
+        # If no API key is configured, the service runs in a degraded mode that
+        # returns a placeholder message instead of crashing at startup.
         if settings.openai_api_key:
             self.client: AsyncOpenAI | None = AsyncOpenAI(api_key=settings.openai_api_key)
             logger.info("LLMService: OpenAI client initialised (model=%s).", settings.openai_model)
@@ -58,11 +60,15 @@ class LLMService:
                 "tool_calls": [],
             }
 
+        # Prepend the system prompt to every request. It is not stored in the
+        # message history that the caller maintains — we inject it here.
         full_messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
             *messages,
         ]
 
+        # Only pass tools when the cache has at least one — sending an empty
+        # tools list to the API causes a validation error.
         response = await self.client.chat.completions.create(
             model=settings.openai_model,
             temperature=0.2,

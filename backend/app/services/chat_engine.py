@@ -9,6 +9,8 @@ from app.services.mcp_client import MCPClient, ToolCache
 
 logger = logging.getLogger(__name__)
 
+# Limit how many tool-call rounds the LLM can make per request to prevent
+# runaway loops and keep latency bounded.
 MAX_TOOL_ITERATIONS = 5
 
 
@@ -27,6 +29,8 @@ class ChatEngine:
         tools = await self.tool_cache.get_tools()
         openai_tools = [self._to_openai_tool(t) for t in tools]
 
+        # Prepend the customer's email as context so the LLM can pass it to
+        # MCP tools that require an email or customer identifier.
         messages: list[dict[str, Any]] = [
             {
                 "role": "user",
@@ -37,11 +41,14 @@ class ChatEngine:
             }
         ]
 
+        # Agentic loop: keep calling the LLM until it returns a plain text reply
+        # (no tool calls) or the iteration cap is reached.
         for iteration in range(MAX_TOOL_ITERATIONS):
             model_response = await self.llm_service.create_completion(messages, openai_tools)
             tool_calls = model_response.get("tool_calls", [])
 
             if not tool_calls:
+                # No tool calls means the LLM has a final answer.
                 content = model_response.get("content", "")
                 return content if content else "I could not generate a response."
 
@@ -52,6 +59,8 @@ class ChatEngine:
                 [c["name"] for c in tool_calls],
             )
 
+            # Append the assistant's tool-call turn so the LLM sees its own
+            # prior decisions when we loop back.
             messages.append(
                 {
                     "role": "assistant",
@@ -70,11 +79,15 @@ class ChatEngine:
                 }
             )
 
+            # Execute each tool call and append results so the LLM can
+            # reason over them in the next iteration.
             for call in tool_calls:
                 try:
                     result = await self.mcp_client.call_tool(call["name"], call["arguments"])
                 except Exception as exc:
                     logger.warning("Tool %s failed: %s", call["name"], exc)
+                    # Return the error as a tool result so the LLM can
+                    # acknowledge it gracefully rather than crashing.
                     result = {"error": str(exc)}
 
                 messages.append(

@@ -12,9 +12,17 @@ logger = logging.getLogger(__name__)
 
 
 class MCPClient:
+    """JSON-RPC 2.0 client for the MCP server.
+
+    The MCP server may respond with plain JSON or Server-Sent Events (SSE).
+    Both formats are handled transparently by _post().
+    """
+
     def __init__(self, server_url: str, timeout_seconds: float = 30.0) -> None:
         self.server_url = server_url
         self.timeout_seconds = timeout_seconds
+        # Session ID returned by the server after initialize(); included in
+        # subsequent requests as the Mcp-Session-Id header.
         self._session_id: str | None = None
 
     async def initialize(self) -> None:
@@ -63,6 +71,9 @@ class MCPClient:
 
     @staticmethod
     def _parse_sse_body(text: str) -> dict[str, Any]:
+        # The MCP server wraps JSON-RPC responses in SSE "data:" lines.
+        # Scan each line and return the first parseable JSON object.
+        # Lines with "[DONE]" are SSE stream terminators and are skipped.
         for line in text.splitlines():
             line = line.strip()
             if line.startswith("data:"):
@@ -109,6 +120,12 @@ class MCPClient:
 
 
 class ToolCache:
+    """Thread-safe in-memory cache for MCP tool definitions.
+
+    Tools are discovered once at startup and reused for every request,
+    avoiding a round-trip to the MCP server on each chat turn.
+    """
+
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._tools: list[dict[str, Any]] = []
