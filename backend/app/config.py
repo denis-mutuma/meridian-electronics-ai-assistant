@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=(str(ROOT_ENV_FILE), str(BACKEND_ENV_FILE), ".env"),
         env_file_encoding="utf-8",
-    extra="ignore",
+        extra="ignore",
     )
 
     app_name: str = "Meridian Electronics AI Assistant"
@@ -21,8 +21,6 @@ class Settings(BaseSettings):
 
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
-
-    default_customer_email: str = "demo.customer1@example.com"
 
     allowed_origins: str = "http://localhost:3000"
 

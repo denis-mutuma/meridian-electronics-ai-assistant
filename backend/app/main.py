@@ -10,7 +10,6 @@ from app.routes.health import router as health_router
 from app.services.chat_engine import ChatEngine
 from app.services.llm_service import LLMService
 from app.services.mcp_client import MCPClient, ToolCache
-from app.services.testdata_contract import validate_testdata_contract
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +19,6 @@ async def lifespan(app: FastAPI):
     mcp_client = MCPClient(settings.mcp_server_url)
     tool_cache = ToolCache()
     llm_service = LLMService()
-
-    try:
-        credentials = validate_testdata_contract()
-        logger.info("Demo credential contract validated: %d rows.", len(credentials))
-    except FileNotFoundError:
-        logger.warning("testdata.md not found; skipping local demo credential validation.")
-    except ValueError as exc:
-        logger.warning("testdata.md contract validation failed: %s", exc)
 
     try:
         await mcp_client.initialize()

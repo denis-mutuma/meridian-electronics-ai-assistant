@@ -10,10 +10,19 @@ type Message = {
 };
 
 export default function HomePage() {
+  const [email, setEmail] = useState("");
+  const [emailConfirmed, setEmailConfirmed] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const handleEmailSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    if (email.trim()) {
+      setEmailConfirmed(true);
+    }
+  };
 
   const handleSend = async (event: FormEvent) => {
     event.preventDefault();
@@ -28,7 +37,7 @@ export default function HomePage() {
     setError("");
 
     try {
-      const reply = await sendChat(message);
+      const reply = await sendChat(email, message);
       setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
     } catch {
       setError("Unable to send message right now.");
@@ -37,9 +46,30 @@ export default function HomePage() {
     }
   };
 
+  if (!emailConfirmed) {
+    return (
+      <main style={{ maxWidth: 480, margin: "80px auto", padding: 24 }}>
+        <h1>Meridian Electronics Assistant</h1>
+        <p>Enter your email address to start.</p>
+        <form onSubmit={handleEmailSubmit} style={{ display: "flex", gap: 10 }}>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            required
+            style={{ flex: 1 }}
+          />
+          <button type="submit">Continue</button>
+        </form>
+      </main>
+    );
+  }
+
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
       <h1>Meridian Electronics Assistant</h1>
+      <p style={{ color: "#57606a" }}>Signed in as <strong>{email}</strong></p>
 
       <section style={{ border: "1px solid #d0d7de", borderRadius: 10, minHeight: 320, padding: 16 }}>
         {messages.map((message, index) => (

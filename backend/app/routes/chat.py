@@ -3,7 +3,6 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.config import settings
 from app.services.chat_engine import ChatEngine
 
 logger = logging.getLogger(__name__)
@@ -11,6 +10,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 class ChatRequest(BaseModel):
+    customer_email: str = Field(min_length=1, max_length=254)
     message: str = Field(min_length=1, max_length=2000)
 
 
@@ -31,7 +31,7 @@ async def chat(
     chat_engine: ChatEngine = Depends(get_chat_engine),
 ) -> ChatResponse:
     try:
-        reply = await chat_engine.respond(settings.default_customer_email, payload.message)
+        reply = await chat_engine.respond(payload.customer_email, payload.message)
     except Exception as exc:
         logger.exception("Chat engine error: %s", exc)
         raise HTTPException(status_code=502, detail="Unable to process request")

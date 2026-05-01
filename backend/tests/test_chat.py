@@ -19,7 +19,7 @@ def test_chat_without_auth() -> None:
         with TestClient(app) as client:
             chat_response = client.post(
                 "/chat",
-                json={"message": "Do you have keyboards in stock?"},
+                json={"customer_email": "user@example.com", "message": "Do you have keyboards in stock?"},
             )
             assert chat_response.status_code == 200
             assert chat_response.json()["reply"] == "stub reply"

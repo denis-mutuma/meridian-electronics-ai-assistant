@@ -5,7 +5,7 @@ A production-oriented MVP support assistant for Meridian Electronics.
 It provides:
 
 - Next.js chat frontend (static export on **S3 + CloudFront**)
-- FastAPI backend with a **POST /chat** endpoint (no JWT; customer context uses `DEFAULT_CUSTOMER_EMAIL`)
+- FastAPI backend with a **POST /chat** endpoint (no JWT; customer email is provided per request)
 - OpenAI GPT-4o-mini for response generation and tool-calling
 - MCP integration for factual business tool lookups
 - AWS deployment: **CloudFront** (UI) → **API Gateway HTTP API** → **ALB** → **ECS Fargate** (API)
@@ -73,13 +73,7 @@ npm install
 npm run dev
 ```
 
-4. Open the app and use the chat box (no sign-in). Optional: set **`DEFAULT_CUSTOMER_EMAIL`** in `.env` for MCP/LLM customer context.
-
-### Local demo credential contract
-
-- The local source of demo credential truth is [testdata.md](testdata.md).
-- Backend startup validates the format and verifies that demo.customer10@example.com maps to PIN 1234.
-- Because MCP is external to this repository, this app can validate local compatibility but cannot enforce the external server's internal dataset.
+4. Open the app and use the chat box. Enter the customer email in the UI; customer verification and order data checks happen via MCP server tools.
 
 ## Terraform (`terraform.tfvars`)
 
