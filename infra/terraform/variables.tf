@@ -25,7 +25,7 @@ variable "openai_api_key" {
 variable "ecs_backend_https_url" {
   description = "Public HTTPS URL of the ECS load balancer (ALB) in front of the FastAPI service. No trailing slash. API Gateway HTTP proxies to this origin."
   type        = string
-  
+
   validation {
     condition = (
       startswith(var.ecs_backend_https_url, "https://") &&

@@ -1,18 +1,12 @@
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
-# ── GitHub OIDC provider ────────────────────────────────────────────────────
-# Only one provider can exist per account.
-# If you already have one, set create_oidc_provider = false and we reference it
-# via the data source below.
-
 resource "aws_iam_openid_connect_provider" "github" {
   count = var.create_oidc_provider ? 1 : 0
 
   url            = "https://token.actions.githubusercontent.com"
   client_id_list = ["sts.amazonaws.com"]
 
-  # AWS-recommended static thumbprint for token.actions.githubusercontent.com
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 }
 
@@ -26,8 +20,6 @@ locals {
   account_id        = data.aws_caller_identity.current.account_id
   region            = data.aws_region.current.name
 }
-
-# ── IAM role ────────────────────────────────────────────────────────────────
 
 data "aws_iam_policy_document" "trust" {
   statement {
@@ -58,10 +50,7 @@ resource "aws_iam_role" "github_actions" {
   assume_role_policy = data.aws_iam_policy_document.trust.json
 }
 
-# ── IAM policy ──────────────────────────────────────────────────────────────
-
 data "aws_iam_policy_document" "permissions" {
-  # ECR auth token (account-level, no resource restriction)
   statement {
     sid       = "ECRAuth"
     effect    = "Allow"
@@ -69,7 +58,6 @@ data "aws_iam_policy_document" "permissions" {
     resources = ["*"]
   }
 
-  # ECR image push
   statement {
     sid    = "ECRPush"
     effect = "Allow"
@@ -85,8 +73,6 @@ data "aws_iam_policy_document" "permissions" {
     resources = var.ecr_repository_arns
   }
 
-  # ECS – describe & update (cluster/service scoping uses wildcards for the
-  # task-definition ARN because revisions are created at deploy time)
   statement {
     sid    = "ECSDescribe"
     effect = "Allow"
@@ -100,9 +86,9 @@ data "aws_iam_policy_document" "permissions" {
   }
 
   statement {
-    sid     = "ECSRegisterTaskDef"
-    effect  = "Allow"
-    actions = ["ecs:RegisterTaskDefinition"]
+    sid       = "ECSRegisterTaskDef"
+    effect    = "Allow"
+    actions   = ["ecs:RegisterTaskDefinition"]
     resources = ["*"]
   }
 

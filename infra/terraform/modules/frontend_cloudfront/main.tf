@@ -1,4 +1,3 @@
-# Resolve the AWS-managed policy by name (IDs differ by partition; hardcoded UUIDs can 404).
 data "aws_cloudfront_cache_policy" "caching_optimized" {
   name = "Managed-CachingOptimized"
 }
@@ -8,7 +7,6 @@ resource "random_id" "bucket_suffix" {
 }
 
 locals {
-  # S3 bucket names: max 63 chars, lowercase, globally unique.
   bucket_name = lower(substr("${replace(var.name_prefix, "_", "-")}-fe-${random_id.bucket_suffix.hex}", 0, 63))
 }
 

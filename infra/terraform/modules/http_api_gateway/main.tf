@@ -7,7 +7,6 @@ resource "aws_apigatewayv2_api" "this" {
   protocol_type = "HTTP"
 }
 
-# Greedy path: /foo/bar -> ALB /foo/bar
 resource "aws_apigatewayv2_integration" "proxy" {
   api_id             = aws_apigatewayv2_api.this.id
   integration_type   = "HTTP_PROXY"
@@ -15,7 +14,6 @@ resource "aws_apigatewayv2_integration" "proxy" {
   integration_uri    = "${local.backend_base}/{proxy}"
 }
 
-# Root path GET/POST / (proxy+ does not match empty remainder)
 resource "aws_apigatewayv2_integration" "root" {
   api_id             = aws_apigatewayv2_api.this.id
   integration_type   = "HTTP_PROXY"
