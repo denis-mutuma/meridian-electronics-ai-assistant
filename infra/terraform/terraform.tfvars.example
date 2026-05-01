@@ -3,7 +3,6 @@
 project_name          = "meridian-electronics-ai-assistant"
 environment           = "dev"
 aws_region            = "us-east-1"
-ecs_backend_https_url = "https://your-alb.us-east-1.elb.amazonaws.com"
 openai_api_key        = "sk-replace_me"
 
 # GitHub OIDC — defaults work for most cases.
