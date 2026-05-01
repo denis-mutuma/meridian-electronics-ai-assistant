@@ -161,10 +161,103 @@ jobs:
             --force-new-deployment
 
       - name: Wait for ECS service stability
+        id: ecs_wait
+        continue-on-error: true
         run: |
           aws ecs wait services-stable \
             --cluster "${ECS_CLUSTER_NAME}" \
             --services "${ECS_SERVICE_NAME}"
+
+      - name: Dump ECS diagnostics on failure
+        if: steps.ecs_wait.outcome == 'failure'
+        run: |
+          echo "ECS service did not stabilize. Collecting diagnostics..."
+
+          SERVICE_JSON=$(aws ecs describe-services \
+            --cluster "${ECS_CLUSTER_NAME}" \
+            --services "${ECS_SERVICE_NAME}" \
+            --output json)
+
+          echo "=== Service Summary ==="
+          echo "$SERVICE_JSON" | jq '.services[0] | {
+            serviceName,
+            status,
+            desiredCount,
+            runningCount,
+            pendingCount,
+            taskDefinition,
+            deployments: [.deployments[] | {
+              id,
+              status,
+              rolloutState,
+              rolloutStateReason,
+              desiredCount,
+              runningCount,
+              pendingCount,
+              failedTasks,
+              taskDefinition
+            }]
+          }'
+
+          echo "=== Recent Service Events ==="
+          echo "$SERVICE_JSON" | jq -r '.services[0].events[:15][] | "\(.createdAt) | \(.message)"'
+
+          STOPPED_TASK_ARNS=$(aws ecs list-tasks \
+            --cluster "${ECS_CLUSTER_NAME}" \
+            --service-name "${ECS_SERVICE_NAME}" \
+            --desired-status STOPPED \
+            --query 'taskArns[:10]' \
+            --output text)
+
+          if [ -n "$STOPPED_TASK_ARNS" ] && [ "$STOPPED_TASK_ARNS" != "None" ]; then
+            echo "=== Stopped Task Reasons ==="
+            TASKS_JSON=$(aws ecs describe-tasks \
+              --cluster "${ECS_CLUSTER_NAME}" \
+              --tasks $STOPPED_TASK_ARNS \
+              --output json)
+
+            echo "$TASKS_JSON" | jq '.tasks[] | {
+                taskArn,
+                lastStatus,
+                desiredStatus,
+                stoppedReason,
+                stopCode,
+                containers: [.containers[] | {
+                  name,
+                  lastStatus,
+                  reason,
+                  exitCode
+                }]
+              }'
+
+            TASK_DEF_ARN=$(echo "$SERVICE_JSON" | jq -r '.services[0].taskDefinition')
+            TASK_DEF_JSON=$(aws ecs describe-task-definition \
+              --task-definition "$TASK_DEF_ARN" \
+              --output json)
+
+            echo "=== CloudWatch Log Configuration ==="
+            echo "$TASK_DEF_JSON" | jq '.taskDefinition.containerDefinitions[] | {
+              name,
+              logDriver: (.logConfiguration.logDriver // "none"),
+              logGroup: (.logConfiguration.options["awslogs-group"] // "n/a"),
+              logRegion: (.logConfiguration.options["awslogs-region"] // "n/a"),
+              logStreamPrefix: (.logConfiguration.options["awslogs-stream-prefix"] // "n/a")
+            }'
+
+            echo "=== Likely CloudWatch Log Streams (if awslogs-stream-prefix is set) ==="
+            echo "$TASKS_JSON" | jq -r '.tasks[] | .taskArn as $taskArn | .containers[] | "\(.name)|\($taskArn)"' | while IFS='|' read -r CONTAINER_NAME TASK_ARN; do
+              TASK_ID="${TASK_ARN##*/}"
+              STREAM_PREFIX=$(echo "$TASK_DEF_JSON" | jq -r --arg NAME "$CONTAINER_NAME" '.taskDefinition.containerDefinitions[] | select(.name == $NAME) | .logConfiguration.options["awslogs-stream-prefix"] // empty')
+              LOG_GROUP=$(echo "$TASK_DEF_JSON" | jq -r --arg NAME "$CONTAINER_NAME" '.taskDefinition.containerDefinitions[] | select(.name == $NAME) | .logConfiguration.options["awslogs-group"] // empty')
+              if [ -n "$STREAM_PREFIX" ] && [ -n "$LOG_GROUP" ]; then
+                echo "container=$CONTAINER_NAME group=$LOG_GROUP stream=$STREAM_PREFIX/$CONTAINER_NAME/$TASK_ID"
+              fi
+            done
+          else
+            echo "No stopped tasks found for this service."
+          fi
+
+          exit 1
 
   deploy-frontend:
     needs: test
