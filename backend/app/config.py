@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     # In production, OPENAI_API_KEY is injected into Lambda by Terraform.
     # Locally, set it in .env.
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
+    openai_model: str = "gpt-5.4-mini"
 
     # Comma-separated list of allowed CORS origins.
     # Hosted CloudFront calls use same-origin /api requests; this mostly
