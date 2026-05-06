@@ -56,6 +56,7 @@ data "aws_iam_policy_document" "permissions" {
     effect = "Allow"
     actions = [
       "lambda:GetFunction",
+      "lambda:GetFunctionConfiguration",
       "lambda:UpdateFunctionCode",
     ]
     resources = [var.lambda_function_arn]
