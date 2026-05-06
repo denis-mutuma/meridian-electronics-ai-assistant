@@ -2,6 +2,7 @@
 // when Next.js generates a static export. Without this prefix, the value would
 // be undefined in the browser.
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
+export const REQUEST_CANCELLED = "request cancelled";
 
 export class ChatApiError extends Error {
   constructor(
@@ -62,7 +63,7 @@ export async function sendChat(
     });
   } catch (exc) {
     if (exc instanceof DOMException && exc.name === "AbortError") {
-      throw new ChatApiError("request cancelled");
+      throw new ChatApiError(REQUEST_CANCELLED);
     }
     throw new ChatApiError("network error");
   }

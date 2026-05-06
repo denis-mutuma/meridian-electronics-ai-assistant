@@ -16,8 +16,6 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "Meridian Electronics AI Assistant"
-    backend_host: str = "0.0.0.0"
-    backend_port: int = 8000
 
     # MCP server that holds all customer/order data
     mcp_server_url: str = "https://order-mcp-74afyau24q-uc.a.run.app/mcp"

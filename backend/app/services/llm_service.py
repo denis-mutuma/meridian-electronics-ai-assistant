@@ -37,6 +37,22 @@ Response style:
 """
 
 
+def _parse_tool_arguments(tool_name: str, raw_arguments: str | None) -> tuple[dict[str, Any], str | None]:
+    if not raw_arguments:
+        return {}, None
+
+    try:
+        loaded = json.loads(raw_arguments)
+    except json.JSONDecodeError:
+        logger.warning("Could not parse arguments for tool %s: %s", tool_name, raw_arguments)
+        return {}, "Tool arguments were not valid JSON."
+
+    if not isinstance(loaded, dict):
+        return {}, "Tool arguments must be a JSON object."
+
+    return loaded, None
+
+
 class LLMService:
     def __init__(self) -> None:
         # If no API key is configured, the service runs in a degraded mode that
@@ -90,22 +106,10 @@ class LLMService:
 
         if choice.tool_calls:
             for call in choice.tool_calls:
-                parsed_args: dict[str, Any] = {}
-                args_error: str | None = None
-                if call.function.arguments:
-                    try:
-                        loaded = json.loads(call.function.arguments)
-                        if isinstance(loaded, dict):
-                            parsed_args = loaded
-                        else:
-                            args_error = "Tool arguments must be a JSON object."
-                    except json.JSONDecodeError:
-                        args_error = "Tool arguments were not valid JSON."
-                        logger.warning(
-                            "Could not parse arguments for tool %s: %s",
-                            call.function.name,
-                            call.function.arguments,
-                        )
+                parsed_args, args_error = _parse_tool_arguments(
+                    call.function.name,
+                    call.function.arguments,
+                )
 
                 tool_calls.append(
                     {

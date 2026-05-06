@@ -2,7 +2,7 @@
 
 import { FormEvent, useRef, useState } from "react";
 
-import { ChatHistoryMessage, sendChat } from "../lib/api";
+import { ChatHistoryMessage, REQUEST_CANCELLED, sendChat } from "../lib/api";
 
 type Message = {
   id: string;
@@ -12,8 +12,31 @@ type Message = {
 };
 
 const RECENT_HISTORY_LIMIT = 8;
-const id = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+const newMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+const pageStyle = { maxWidth: 900, margin: "0 auto", padding: 24 };
+const emailPageStyle = { maxWidth: 480, margin: "80px auto", padding: 24 };
+const emailFormStyle = { display: "flex", gap: 10 };
+const composerStyle = { display: "flex", gap: 10, marginTop: 12 };
+const messageLabelStyle = { color: "#57606a", fontSize: 12, fontWeight: 700, marginBottom: 4 };
+const chatSectionStyle = {
+  border: "1px solid #d0d7de",
+  borderRadius: 10,
+  minHeight: 320,
+  padding: 16,
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 12,
+};
+const messageBubbleStyle = (role: Message["role"]) => ({
+  alignSelf: role === "user" ? "flex-end" : "flex-start",
+  maxWidth: "78%",
+  border: "1px solid #d0d7de",
+  borderRadius: 8,
+  padding: "10px 12px",
+  background: role === "user" ? "#f6f8fa" : "#ffffff",
+});
 
 export default function HomePage() {
   const [email, setEmail] = useState("");
@@ -25,7 +48,7 @@ export default function HomePage() {
   const abortRef = useRef<AbortController | null>(null);
   const streamRef = useRef(0);
 
-  const history = (skipId?: string): ChatHistoryMessage[] =>
+  const buildHistory = (skipId?: string): ChatHistoryMessage[] =>
     messages
       .filter((m) => m.id !== skipId && m.status !== "failed")
       .slice(-RECENT_HISTORY_LIMIT)
@@ -37,7 +60,7 @@ export default function HomePage() {
   const streamReply = async (reply: string, messageId: string, token: number) => {
     for (let i = 4; i < reply.length && streamRef.current === token; i += 4) {
       patchMessage(messageId, { content: reply.slice(0, i) });
-      await sleep(18);
+      await delay(18);
     }
     if (streamRef.current === token) {
       patchMessage(messageId, { content: reply, status: undefined });
@@ -48,7 +71,7 @@ export default function HomePage() {
     const content = raw.trim();
     if (!content || loading) return;
 
-    const userId = retryId ?? id();
+    const userId = retryId ?? newMessageId();
     const controller = new AbortController();
     const token = streamRef.current + 1;
     abortRef.current = controller;
@@ -62,8 +85,8 @@ export default function HomePage() {
     });
 
     try {
-      const reply = await sendChat(email, content, history(retryId), controller.signal);
-      const assistantId = id();
+      const reply = await sendChat(email, content, buildHistory(retryId), controller.signal);
+      const assistantId = newMessageId();
       patchMessage(userId, { status: undefined });
       setMessages((prev) => [
         ...prev,
@@ -72,7 +95,7 @@ export default function HomePage() {
       await streamReply(reply, assistantId, token);
     } catch (exc) {
       const reason = exc instanceof Error ? exc.message : "unknown error";
-      setError(reason === "request cancelled" ? "Chat request cancelled." : `Chat request failed: ${reason}`);
+      setError(reason === REQUEST_CANCELLED ? "Chat request cancelled." : `Chat request failed: ${reason}`);
       patchMessage(userId, { status: "failed" });
     } finally {
       abortRef.current = null;
@@ -90,17 +113,17 @@ export default function HomePage() {
     await sendMessage(input);
   };
 
-  const cancel = () => {
+  const cancelRequest = () => {
     streamRef.current += 1;
     abortRef.current?.abort();
   };
 
   if (!emailConfirmed) {
     return (
-      <main style={{ maxWidth: 480, margin: "80px auto", padding: 24 }}>
+      <main style={emailPageStyle}>
         <h1>Meridian Electronics Assistant</h1>
         <p>Enter your email address to start.</p>
-        <form onSubmit={handleEmailSubmit} style={{ display: "flex", gap: 10 }}>
+        <form onSubmit={handleEmailSubmit} style={emailFormStyle}>
           <input
             type="email"
             value={email}
@@ -116,36 +139,21 @@ export default function HomePage() {
   }
 
   return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
+    <main style={pageStyle}>
       <h1>Meridian Electronics Assistant</h1>
       <p style={{ color: "#57606a" }}>Signed in as <strong>{email}</strong></p>
 
       <section
         aria-label="Chat messages"
         aria-live="polite"
-        style={{
-          border: "1px solid #d0d7de",
-          borderRadius: 10,
-          minHeight: 320,
-          padding: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-        }}
+        style={chatSectionStyle}
       >
         {messages.map((m) => (
           <div
             key={m.id}
-            style={{
-              alignSelf: m.role === "user" ? "flex-end" : "flex-start",
-              maxWidth: "78%",
-              border: "1px solid #d0d7de",
-              borderRadius: 8,
-              padding: "10px 12px",
-              background: m.role === "user" ? "#f6f8fa" : "#ffffff",
-            }}
+            style={messageBubbleStyle(m.role)}
           >
-            <div style={{ color: "#57606a", fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+            <div style={messageLabelStyle}>
               {m.role === "user" ? "You" : "Assistant"}
               {m.status === "sending" && " - sending"}
               {m.status === "failed" && " - failed"}
@@ -162,7 +170,7 @@ export default function HomePage() {
         {loading && <p>Assistant is thinking...</p>}
       </section>
 
-      <form onSubmit={handleSend} style={{ display: "flex", gap: 10, marginTop: 12 }}>
+      <form onSubmit={handleSend} style={composerStyle}>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -171,7 +179,7 @@ export default function HomePage() {
           disabled={loading}
         />
         <button type="submit" disabled={loading || !input.trim()}>Send</button>
-        {loading && <button type="button" onClick={cancel}>Cancel</button>}
+        {loading && <button type="button" onClick={cancelRequest}>Cancel</button>}
       </form>
 
       {error && <p style={{ color: "#b42318" }}>{error}</p>}

@@ -28,11 +28,6 @@ output "frontend_url" {
   description = "HTTPS URL for the UI (CloudFront)"
 }
 
-output "frontend_origin_https" {
-  value       = module.frontend_cloudfront.frontend_url
-  description = "Same as frontend_url"
-}
-
 output "github_actions_role_arn" {
   value       = module.github_oidc.role_arn
   description = "IAM role ARN for GitHub Actions OIDC (set AWS_ROLE_ARN GitHub var if you override the default)"
