@@ -1,6 +1,6 @@
 # Meridian Electronics AI Assistant
 
-A customer support chat assistant for Meridian Electronics. Customers enter their email, then ask questions about their orders, products, and account. The backend fetches real data from an MCP server and generates responses with GPT-5.4 mini.
+A customer support chat assistant for Meridian Electronics. Customers enter their email, then ask questions about their orders, products, and account. The backend fetches real data from an MCP server and generates responses with GPT-5.4 nano.
 
 ## Architecture
 
@@ -17,7 +17,7 @@ API Gateway (HTTP API)
   ▼
 Lambda (FastAPI + Mangum)
   │
-  ├── OpenAI GPT-5.4 mini
+  ├── OpenAI GPT-5.4 nano
   └── MCP server (order/customer data)
 ```
 
@@ -25,7 +25,7 @@ Lambda (FastAPI + Mangum)
 
 - **Frontend**: Next.js 14 (static export) → S3 + CloudFront
 - **Backend**: FastAPI (Python 3.12) on AWS Lambda via Mangum
-- **AI**: GPT-5.4 mini via OpenAI API
+- **AI**: GPT-5.4 nano via OpenAI API
 - **Data**: External MCP server — all customer and order data lives there, not in this repo
 - **Infra**: Terraform — Lambda, API Gateway, S3, CloudFront, GitHub OIDC IAM
 
