@@ -13,6 +13,11 @@ export class ChatApiError extends Error {
   }
 }
 
+export type ChatHistoryMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 async function readErrorDetail(response: Response): Promise<string> {
   const contentType = response.headers.get("content-type") ?? "";
 
@@ -38,7 +43,11 @@ async function readErrorDetail(response: Response): Promise<string> {
   }
 }
 
-export async function sendChat(customerEmail: string, message: string): Promise<string> {
+export async function sendChat(
+  customerEmail: string,
+  message: string,
+  history: ChatHistoryMessage[] = [],
+): Promise<string> {
   let response: Response;
 
   try {
@@ -47,7 +56,7 @@ export async function sendChat(customerEmail: string, message: string): Promise<
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ customer_email: customerEmail, message }),
+      body: JSON.stringify({ customer_email: customerEmail, message, history }),
     });
   } catch {
     throw new ChatApiError("network error");

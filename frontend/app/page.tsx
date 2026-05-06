@@ -9,6 +9,8 @@ type Message = {
   content: string;
 };
 
+const RECENT_HISTORY_LIMIT = 8;
+
 export default function HomePage() {
   // Email gate: the user must confirm their email before entering the chat.
   // The email is not stored in a session or cookie — it is passed as a plain
@@ -34,6 +36,7 @@ export default function HomePage() {
     }
 
     const message = input.trim();
+    const history = messages.slice(-RECENT_HISTORY_LIMIT);
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: message }]);
     setLoading(true);
@@ -42,7 +45,7 @@ export default function HomePage() {
     try {
       // Pass the confirmed email on every message — the backend uses it to
       // scope MCP tool calls to the correct customer.
-      const reply = await sendChat(email, message);
+      const reply = await sendChat(email, message, history);
       setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
     } catch (exc) {
       const reason = exc instanceof Error ? exc.message : "unknown error";

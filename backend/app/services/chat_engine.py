@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 # Limit how many tool-call rounds the LLM can make per request to prevent
 # runaway loops and keep latency bounded.
 MAX_TOOL_ITERATIONS = 5
+MAX_HISTORY_MESSAGES = 8
+MAX_TOOL_RESULT_CHARS = 6000
 
 
 class ChatEngine:
@@ -26,25 +28,31 @@ class ChatEngine:
         self.tool_cache = tool_cache
         self.llm_service = llm_service
         self._tools_loaded = False
+        self._tool_discovery_failed = False
         self._tool_load_lock = asyncio.Lock()
 
-    async def respond(self, user_email: str, user_message: str) -> str:
+    async def respond(
+        self,
+        user_email: str,
+        user_message: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> str:
         await self._ensure_tools_loaded()
         llm_service = self._get_llm_service()
         tools = await self.tool_cache.get_tools()
+        if not tools and self._tool_discovery_failed:
+            await self._ensure_tools_loaded(force_retry=True)
+            tools = await self.tool_cache.get_tools()
         openai_tools = [self._to_openai_tool(t) for t in tools]
 
-        # Prepend the customer's email as context so the LLM can pass it to
-        # MCP tools that require an email or customer identifier.
         messages: list[dict[str, Any]] = [
             {
-                "role": "user",
-                "content": (
-                    "[Customer context: authenticated email = " + user_email + "]\n"
-                    + user_message
-                ),
+                "role": "system",
+                "content": f"Authenticated customer email: {user_email}",
             }
         ]
+        messages.extend(self._normalize_history(history or []))
+        messages.append({"role": "user", "content": user_message})
 
         # Agentic loop: keep calling the LLM until it returns a plain text reply
         # (no tool calls) or the iteration cap is reached.
@@ -84,29 +92,15 @@ class ChatEngine:
                 }
             )
 
-            # Execute each tool call and append results so the LLM can
-            # reason over them in the next iteration.
-            for call in tool_calls:
-                try:
-                    result = await self.mcp_client.call_tool(call["name"], call["arguments"])
-                except Exception as exc:
-                    logger.warning("Tool %s failed: %s", call["name"], exc)
-                    # Return the error as a tool result so the LLM can
-                    # acknowledge it gracefully rather than crashing.
-                    result = {"error": str(exc)}
-
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call["id"],
-                        "content": json.dumps(result),
-                    }
-                )
+            tool_results = await asyncio.gather(
+                *(self._execute_tool_call(call) for call in tool_calls)
+            )
+            messages.extend(tool_results)
 
         logger.warning("Tool loop hit MAX_TOOL_ITERATIONS (%d).", MAX_TOOL_ITERATIONS)
         return (
-            "I wasn't able to complete your request in the allowed steps. "
-            "Please try rephrasing or break it into smaller questions."
+            "I couldn't complete that in one chat step. Please try a shorter request "
+            "or ask about one order or product at a time."
         )
 
     def _get_llm_service(self) -> LLMService:
@@ -114,12 +108,12 @@ class ChatEngine:
             self.llm_service = LLMService()
         return self.llm_service
 
-    async def _ensure_tools_loaded(self) -> None:
-        if self._tools_loaded:
+    async def _ensure_tools_loaded(self, force_retry: bool = False) -> None:
+        if self._tools_loaded and not force_retry:
             return
 
         async with self._tool_load_lock:
-            if self._tools_loaded:
+            if self._tools_loaded and not force_retry:
                 return
 
             try:
@@ -127,11 +121,55 @@ class ChatEngine:
                 discovered_tools = await self.mcp_client.list_tools()
                 await self.tool_cache.set_tools(discovered_tools)
                 logger.info("MCP tool discovery succeeded: %d tools loaded.", len(discovered_tools))
+                self._tool_discovery_failed = False
+                self._tools_loaded = True
             except Exception as exc:
                 logger.warning("MCP tool discovery failed: %s", exc)
                 await self.tool_cache.set_tools([])
-            finally:
+                self._tool_discovery_failed = True
                 self._tools_loaded = True
+
+    async def _execute_tool_call(self, call: dict[str, Any]) -> dict[str, Any]:
+        args_error = call.get("arguments_error")
+        if args_error:
+            result = {"error": args_error}
+        else:
+            try:
+                result = await self.mcp_client.call_tool(call["name"], call["arguments"])
+            except Exception as exc:
+                logger.warning("Tool %s failed: %s", call["name"], exc)
+                result = {"error": str(exc)}
+
+        return {
+            "role": "tool",
+            "tool_call_id": call["id"],
+            "content": self._serialize_tool_result(result),
+        }
+
+    def _normalize_history(self, history: list[dict[str, str]]) -> list[dict[str, str]]:
+        normalized: list[dict[str, str]] = []
+
+        for message in history[-MAX_HISTORY_MESSAGES:]:
+            role = message.get("role")
+            content = (message.get("content") or "").strip()
+            if role in {"user", "assistant"} and content:
+                normalized.append({"role": role, "content": content[:4000]})
+
+        return normalized
+
+    def _serialize_tool_result(self, result: Any) -> str:
+        try:
+            serialized = json.dumps(result)
+        except TypeError:
+            serialized = json.dumps({"error": "Tool returned a non-serializable result."})
+
+        if len(serialized) <= MAX_TOOL_RESULT_CHARS:
+            return serialized
+
+        return (
+            serialized[:MAX_TOOL_RESULT_CHARS]
+            + '... {"notice": "Tool result was truncated before returning to the model."}'
+        )
 
     def _to_openai_tool(self, mcp_tool: dict[str, Any]) -> dict[str, Any]:
         input_schema = mcp_tool.get("inputSchema", {})
