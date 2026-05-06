@@ -22,13 +22,14 @@ class Settings(BaseSettings):
     # MCP server that holds all customer/order data
     mcp_server_url: str = "https://order-mcp-74afyau24q-uc.a.run.app/mcp"
 
-    # In production, OPENAI_API_KEY is injected from Secrets Manager by ECS.
+    # In production, OPENAI_API_KEY is injected into Lambda by Terraform.
     # Locally, set it in .env.
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
 
     # Comma-separated list of allowed CORS origins.
-    # In production this is set to the CloudFront URL via an ECS environment variable.
+    # Hosted CloudFront calls use same-origin /api requests; this mostly
+    # supports local development or direct API Gateway browser access.
     allowed_origins: str = "http://localhost:3000"
 
 

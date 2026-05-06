@@ -12,7 +12,9 @@ __pycache__/
 htmlcov/
 node_modules/
 .next/
+.next*/
 out/
+build/
 .env
 .env.*
 !.env.example

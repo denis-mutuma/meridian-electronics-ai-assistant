@@ -5,7 +5,7 @@ output "api_id" {
 
 output "api_endpoint" {
   value       = aws_apigatewayv2_api.this.api_endpoint
-  description = "Invoke URL base (no trailing slash), suitable for NEXT_PUBLIC_API_BASE_URL"
+  description = "Invoke URL base (no trailing slash). CloudFront forwards /api/* here."
 }
 
 output "execution_arn" {

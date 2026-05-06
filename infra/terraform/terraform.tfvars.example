@@ -4,14 +4,13 @@ project_name          = "meridian-electronics-ai-assistant"
 environment           = "dev"
 aws_region            = "us-east-1"
 openai_api_key        = "sk-replace_me"
+# lambda_allowed_origins = "https://your-cloudfront-domain.cloudfront.net"
 
 # GitHub OIDC — defaults work for most cases.
 # github_repo                 = "owner/repo"           # default: denis-mutuma/meridian-electronics-ai-assistant
 # create_github_oidc_provider = false                  # set false if OIDC provider already exists in this account
 
 # After apply, set GitHub Actions variables (see README):
-#   NEXT_PUBLIC_API_BASE_URL  = terraform output api_gateway_invoke_url
-#   FRONTEND_S3_BUCKET        = terraform output frontend_s3_bucket
+#   BACKEND_LAMBDA_FUNCTION_NAME = terraform output lambda_function_name
+#   FRONTEND_S3_BUCKET          = terraform output frontend_s3_bucket
 #   CLOUDFRONT_DISTRIBUTION_ID = terraform output cloudfront_distribution_id
-#   OPENAI_SECRET_ARN         = terraform output openai_secret_arn
-#   ALLOWED_ORIGINS           = terraform output frontend_origin_https

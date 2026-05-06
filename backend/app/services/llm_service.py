@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
-
-from openai import AsyncOpenAI
+from typing import TYPE_CHECKING, Any
 
 from app.config import settings
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,8 @@ class LLMService:
         # If no API key is configured, the service runs in a degraded mode that
         # returns a placeholder message instead of crashing at startup.
         if settings.openai_api_key:
+            from openai import AsyncOpenAI
+
             self.client: AsyncOpenAI | None = AsyncOpenAI(api_key=settings.openai_api_key)
             logger.info("LLMService: OpenAI client initialised (model=%s).", settings.openai_model)
         else:

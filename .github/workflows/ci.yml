@@ -35,8 +35,6 @@ jobs:
           node-version: "20"
 
       - name: Install dependencies and build
-        env:
-          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
         run: |
           cd frontend
           npm ci

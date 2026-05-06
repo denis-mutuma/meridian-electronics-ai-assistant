@@ -3,8 +3,13 @@ variable "name_prefix" {
   type        = string
 }
 
-variable "backend_https_url" {
-  description = "HTTPS origin for ECS (ALB listener URL), no trailing slash, e.g. https://my-alb.us-east-1.elb.amazonaws.com"
+variable "lambda_function_name" {
+  description = "Lambda backend function name"
+  type        = string
+}
+
+variable "lambda_invoke_arn" {
+  description = "Lambda backend invoke ARN"
   type        = string
 }
 

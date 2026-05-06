@@ -1,11 +1,6 @@
-output "backend_ecr_repository_url" {
-  value       = module.ecr.repository_url
-  description = "ECR repository URL for backend image"
-}
-
 output "api_gateway_invoke_url" {
   value       = module.http_api_gateway.api_endpoint
-  description = "Public HTTP API invoke URL (set ECS / GitHub NEXT_PUBLIC_API_BASE_URL to this)"
+  description = "Public HTTP API invoke URL. CloudFront forwards /api/* here."
 }
 
 output "api_gateway_id" {
@@ -35,7 +30,7 @@ output "frontend_url" {
 
 output "frontend_origin_https" {
   value       = module.frontend_cloudfront.frontend_url
-  description = "Same as frontend_url — set ECS ALLOWED_ORIGINS / GitHub var to this for CORS"
+  description = "Same as frontend_url"
 }
 
 output "github_actions_role_arn" {
@@ -43,7 +38,7 @@ output "github_actions_role_arn" {
   description = "IAM role ARN for GitHub Actions OIDC (set AWS_ROLE_ARN GitHub var if you override the default)"
 }
 
-output "openai_secret_arn" {
-  value       = module.openai_secret.secret_arn
-  description = "Secret ARN for OpenAI API key (ECS task definition secrets.valueFrom)"
+output "lambda_function_name" {
+  value       = module.lambda_backend.function_name
+  description = "Backend Lambda function name (GitHub var BACKEND_LAMBDA_FUNCTION_NAME)"
 }

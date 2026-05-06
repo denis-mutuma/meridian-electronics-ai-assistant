@@ -17,9 +17,45 @@ variable "aws_region" {
 }
 
 variable "openai_api_key" {
-  description = "OpenAI API key (stored in Secrets Manager for ECS to reference)"
+  description = "OpenAI API key injected into the backend Lambda"
   type        = string
   sensitive   = true
+}
+
+variable "mcp_server_url" {
+  description = "MCP server that holds customer and order data"
+  type        = string
+  default     = "https://order-mcp-74afyau24q-uc.a.run.app/mcp"
+}
+
+variable "lambda_package_path" {
+  description = "Path to the backend Lambda deployment zip. Run scripts/build_lambda_package.sh before terraform apply."
+  type        = string
+  default     = "../../build/backend-lambda.zip"
+}
+
+variable "lambda_allowed_origins" {
+  description = "Comma-separated CORS origins for direct API access. Same-origin CloudFront /api calls do not require CORS."
+  type        = string
+  default     = "http://localhost:3000"
+}
+
+variable "lambda_memory_size" {
+  description = "Backend Lambda memory size in MB"
+  type        = number
+  default     = 512
+}
+
+variable "lambda_timeout" {
+  description = "Backend Lambda timeout in seconds"
+  type        = number
+  default     = 30
+}
+
+variable "lambda_log_retention_days" {
+  description = "Backend Lambda CloudWatch log retention in days"
+  type        = number
+  default     = 7
 }
 
 variable "api_gateway_throttling_burst_limit" {

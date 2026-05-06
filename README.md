@@ -10,15 +10,12 @@ Browser
   ▼
 CloudFront ──► S3 (Next.js static export)
   │
-  │  (API calls)
+  │  /api/* requests
   ▼
 API Gateway (HTTP API)
   │
   ▼
-ALB
-  │
-  ▼
-ECS Fargate (FastAPI, port 8000)
+Lambda (FastAPI + Mangum)
   │
   ├── OpenAI GPT-4o-mini
   └── MCP server (order/customer data)
@@ -27,10 +24,10 @@ ECS Fargate (FastAPI, port 8000)
 ## Stack
 
 - **Frontend**: Next.js 14 (static export) → S3 + CloudFront
-- **Backend**: FastAPI (Python 3.12) on ECS Fargate
+- **Backend**: FastAPI (Python 3.12) on AWS Lambda via Mangum
 - **AI**: GPT-4o-mini via OpenAI API
 - **Data**: External MCP server — all customer and order data lives there, not in this repo
-- **Infra**: Terraform — ECR, Secrets Manager, API Gateway, ALB, S3, CloudFront, GitHub OIDC IAM
+- **Infra**: Terraform — Lambda, API Gateway, S3, CloudFront, GitHub OIDC IAM
 
 ## Local development
 
@@ -63,6 +60,8 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 npm run dev
 |--------|------|-------------|
 | `GET` | `/health` | Health check |
 | `POST` | `/chat` | Send a message |
+| `GET` | `/api/health` | CloudFront/API Gateway health check |
+| `POST` | `/api/chat` | CloudFront/API Gateway chat endpoint |
 
 `POST /chat` body:
 ```json
@@ -78,9 +77,9 @@ uv run pytest -q
 
 ## Infrastructure
 
-Terraform manages: ECR, Secrets Manager (OpenAI key), API Gateway, ALB, S3, CloudFront, and the GitHub OIDC IAM role.
+Terraform manages: Lambda, API Gateway, S3, CloudFront, and the GitHub OIDC IAM role.
 
-The ECS cluster/service and VPC are pre-existing. Their IDs are hardcoded in `infra/terraform/main.tf` under the `alb` module.
+The existing CloudFront distribution is kept in place. Terraform updates it with an `/api/*` behavior that forwards API requests to API Gateway, while the default behavior continues to serve the static frontend from S3.
 
 ### First-time setup
 
@@ -90,24 +89,29 @@ cp infra/terraform/terraform.tfvars.example infra/terraform/terraform.tfvars
 ```
 Set `openai_api_key`. Set `create_github_oidc_provider = false` if one already exists in the account.
 
-2. Apply:
+2. Build the initial Lambda package:
+```bash
+bash scripts/build_lambda_package.sh
+```
+
+3. Apply:
 ```bash
 cd infra/terraform
 terraform init
 terraform apply
 ```
 
-3. Set these GitHub Actions variables from the Terraform outputs:
+4. Set these GitHub Actions variables from the Terraform outputs:
 
 | GitHub Variable | Terraform Output |
 |----------------|-----------------|
-| `NEXT_PUBLIC_API_BASE_URL` | `api_gateway_invoke_url` |
+| `BACKEND_LAMBDA_FUNCTION_NAME` | `lambda_function_name` |
 | `FRONTEND_S3_BUCKET` | `frontend_s3_bucket` |
 | `CLOUDFRONT_DISTRIBUTION_ID` | `cloudfront_distribution_id` |
-| `OPENAI_SECRET_ARN` | `openai_secret_arn` |
-| `ALLOWED_ORIGINS` | `frontend_origin_https` |
+
+After the new Lambda path is verified, scale the old manually-created ECS service to `0` or delete the old ECS/ALB resources in AWS if they still exist outside this Terraform state.
 
 ## CI/CD
 
 - **`ci.yml`**: Runs on PRs — backend tests + frontend build
-- **`deploy.yml`**: Runs on push to `main` — builds and pushes Docker image to ECR, updates ECS service, syncs frontend to S3, invalidates CloudFront
+- **`deploy.yml`**: Runs on push to `main` — builds and updates the Lambda backend, syncs frontend to S3, invalidates CloudFront

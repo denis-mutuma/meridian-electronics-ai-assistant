@@ -44,8 +44,9 @@ export default function HomePage() {
       // scope MCP tool calls to the correct customer.
       const reply = await sendChat(email, message);
       setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
-    } catch {
-      setError("Unable to send message right now.");
+    } catch (exc) {
+      const reason = exc instanceof Error ? exc.message : "unknown error";
+      setError(`Chat request failed: ${reason}`);
     } finally {
       setLoading(false);
     }

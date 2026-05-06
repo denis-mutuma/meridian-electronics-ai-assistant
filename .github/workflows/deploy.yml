@@ -33,40 +33,33 @@ jobs:
           node-version: "20"
 
       - name: Build frontend (static export)
-        env:
-          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000' }}
         run: |
           cd frontend
           npm ci
           npm run build
 
-  deploy:
+  deploy-backend:
     needs: test
     runs-on: ubuntu-latest
     environment: dev
     env:
       AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::673786334778:role/meridian-electronics-github-actions' }}
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-      ECR_REPO_NAME: ${{ vars.ECR_REPO_NAME || 'meridian-electronics-ai-assistant-dev-backend' }}
-      ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME || 'meridian-assistant-cluster' }}
-      ECS_SERVICE_NAME: ${{ vars.ECS_SERVICE_NAME || 'meridian-assistant-backend-svc' }}
-      ECS_TASK_FAMILY: ${{ vars.ECS_TASK_FAMILY || 'meridian-assistant-backend' }}
-      ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME || 'backend' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve backend deploy settings (Variables or Secrets)
+      - name: Resolve backend deploy settings
         env:
-          V_OPENAI_SECRET_ARN: ${{ vars.OPENAI_SECRET_ARN }}
-          S_OPENAI_SECRET_ARN: ${{ secrets.OPENAI_SECRET_ARN }}
+          V_FUNCTION_NAME: ${{ vars.BACKEND_LAMBDA_FUNCTION_NAME }}
+          S_FUNCTION_NAME: ${{ secrets.BACKEND_LAMBDA_FUNCTION_NAME }}
         run: |
           set -e
-          OPENAI_SECRET_ARN="${V_OPENAI_SECRET_ARN:-$S_OPENAI_SECRET_ARN}"
-          if [ -z "$OPENAI_SECRET_ARN" ]; then
-            echo "::error::Define OPENAI_SECRET_ARN on GitHub Environment dev (or repo Actions Variables/Secrets) from the Terraform output openai_secret_arn."
+          FUNCTION_NAME="${V_FUNCTION_NAME:-$S_FUNCTION_NAME}"
+          if [ -z "$FUNCTION_NAME" ]; then
+            echo "::error::Define BACKEND_LAMBDA_FUNCTION_NAME from the Terraform output lambda_function_name."
             exit 1
           fi
-          echo "OPENAI_SECRET_ARN=$OPENAI_SECRET_ARN" >> "$GITHUB_ENV"
+          echo "BACKEND_LAMBDA_FUNCTION_NAME=$FUNCTION_NAME" >> "$GITHUB_ENV"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -74,211 +67,26 @@ jobs:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Ensure ECS execution role can read OpenAI secret
-        env:
-          OPENAI_SECRET_ARN: ${{ env.OPENAI_SECRET_ARN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Build Lambda package
+        run: bash scripts/build_lambda_package.sh
+
+      - name: Update Lambda function code
         run: |
-          set -euo pipefail
+          aws lambda update-function-code \
+            --function-name "${BACKEND_LAMBDA_FUNCTION_NAME}" \
+            --zip-file "fileb://build/backend-lambda.zip"
 
-          TASK_DEF_JSON=$(aws ecs describe-task-definition \
-            --task-definition "${ECS_TASK_FAMILY}" \
-            --query taskDefinition \
-            --output json)
-
-          EXEC_ROLE_ARN=$(echo "$TASK_DEF_JSON" | jq -r '.executionRoleArn // empty')
-          if [ -z "$EXEC_ROLE_ARN" ]; then
-            echo "::warning::Task definition ${ECS_TASK_FAMILY} has no executionRoleArn. Skipping secret policy attachment."
-            exit 0
-          fi
-
-          EXEC_ROLE_NAME="${EXEC_ROLE_ARN##*/}"
-          SECRET_POLICY_DOC=$(jq -n --arg SECRET_ARN "$OPENAI_SECRET_ARN" '{
-            Version: "2012-10-17",
-            Statement: [
-              {
-                Effect: "Allow",
-                Action: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
-                Resource: [$SECRET_ARN, ($SECRET_ARN + "*")]
-              }
-            ]
-          }')
-
-          aws iam put-role-policy \
-            --role-name "$EXEC_ROLE_NAME" \
-            --policy-name "AllowOpenAISecretRead" \
-            --policy-document "$SECRET_POLICY_DOC"
-
-          echo "Execution role $EXEC_ROLE_NAME is allowed to read $OPENAI_SECRET_ARN"
-
-      - name: Resolve ECR repository URL
-        id: ecr
+      - name: Wait for Lambda update
         run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          REPO_URL="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}"
-          echo "repo_url=${REPO_URL}" >> "$GITHUB_OUTPUT"
-
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and push backend Docker image
-        id: image
-        env:
-          REPO_URL: ${{ steps.ecr.outputs.repo_url }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          IMAGE_URI="${REPO_URL}:${IMAGE_TAG}"
-          docker build -t "${IMAGE_URI}" backend/
-          docker push "${IMAGE_URI}"
-          docker tag "${IMAGE_URI}" "${REPO_URL}:latest"
-          docker push "${REPO_URL}:latest"
-          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
-
-      - name: Register new ECS task definition revision
-        id: taskdef
-        env:
-          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
-          ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
-          OPENAI_SECRET_ARN: ${{ env.OPENAI_SECRET_ARN }}
-        run: |
-          TASK_DEF_JSON=$(aws ecs describe-task-definition \
-            --task-definition "${ECS_TASK_FAMILY}" \
-            --query taskDefinition \
-            --output json)
-
-          NEW_TASK_DEF=$(echo "$TASK_DEF_JSON" | jq \
-            --arg IMAGE_URI "$IMAGE_URI" \
-            --arg CONTAINER "${ECS_CONTAINER_NAME}" \
-            --arg ALLOWED_ORIGINS "${ALLOWED_ORIGINS:-}" \
-            --arg OPENAI_SECRET_ARN "$OPENAI_SECRET_ARN" \
-            '
-              .containerDefinitions |= map(
-                if .name == $CONTAINER then
-                  .image = $IMAGE_URI
-                  | .environment = ((.environment // []) | map(select(.name != "OPENAI_API_KEY")))
-                  | .secrets = ((.secrets // []) | map(select(.name != "OPENAI_API_KEY")) + [{"name":"OPENAI_API_KEY","valueFrom":$OPENAI_SECRET_ARN}])
-                  | if ($ALLOWED_ORIGINS | length) > 0 then
-                      .environment = ((.environment // []) | map(select(.name != "ALLOWED_ORIGINS")) + [{"name":"ALLOWED_ORIGINS","value":$ALLOWED_ORIGINS}])
-                    else .
-                    end
-                else .
-                end
-              )
-              | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
-            ')
-
-          TASK_DEF_ARN=$(aws ecs register-task-definition \
-            --cli-input-json "$NEW_TASK_DEF" \
-            --query "taskDefinition.taskDefinitionArn" \
-            --output text)
-
-          echo "task_definition_arn=${TASK_DEF_ARN}" >> "$GITHUB_OUTPUT"
-
-      - name: Update ECS service
-        run: |
-          aws ecs update-service \
-            --cluster "${ECS_CLUSTER_NAME}" \
-            --service "${ECS_SERVICE_NAME}" \
-            --task-definition "${{ steps.taskdef.outputs.task_definition_arn }}" \
-            --force-new-deployment
-
-      - name: Wait for ECS service stability
-        id: ecs_wait
-        continue-on-error: true
-        run: |
-          aws ecs wait services-stable \
-            --cluster "${ECS_CLUSTER_NAME}" \
-            --services "${ECS_SERVICE_NAME}"
-
-      - name: Dump ECS diagnostics on failure
-        if: steps.ecs_wait.outcome == 'failure'
-        run: |
-          echo "ECS service did not stabilize. Collecting diagnostics..."
-
-          SERVICE_JSON=$(aws ecs describe-services \
-            --cluster "${ECS_CLUSTER_NAME}" \
-            --services "${ECS_SERVICE_NAME}" \
-            --output json)
-
-          echo "=== Service Summary ==="
-          echo "$SERVICE_JSON" | jq '.services[0] | {
-            serviceName,
-            status,
-            desiredCount,
-            runningCount,
-            pendingCount,
-            taskDefinition,
-            deployments: [.deployments[] | {
-              id,
-              status,
-              rolloutState,
-              rolloutStateReason,
-              desiredCount,
-              runningCount,
-              pendingCount,
-              failedTasks,
-              taskDefinition
-            }]
-          }'
-
-          echo "=== Recent Service Events ==="
-          echo "$SERVICE_JSON" | jq -r '.services[0].events[:15][] | "\(.createdAt) | \(.message)"'
-
-          STOPPED_TASK_ARNS=$(aws ecs list-tasks \
-            --cluster "${ECS_CLUSTER_NAME}" \
-            --service-name "${ECS_SERVICE_NAME}" \
-            --desired-status STOPPED \
-            --query 'taskArns[:10]' \
-            --output text)
-
-          if [ -n "$STOPPED_TASK_ARNS" ] && [ "$STOPPED_TASK_ARNS" != "None" ]; then
-            echo "=== Stopped Task Reasons ==="
-            TASKS_JSON=$(aws ecs describe-tasks \
-              --cluster "${ECS_CLUSTER_NAME}" \
-              --tasks $STOPPED_TASK_ARNS \
-              --output json)
-
-            echo "$TASKS_JSON" | jq '.tasks[] | {
-                taskArn,
-                lastStatus,
-                desiredStatus,
-                stoppedReason,
-                stopCode,
-                containers: [.containers[] | {
-                  name,
-                  lastStatus,
-                  reason,
-                  exitCode
-                }]
-              }'
-
-            TASK_DEF_ARN=$(echo "$SERVICE_JSON" | jq -r '.services[0].taskDefinition')
-            TASK_DEF_JSON=$(aws ecs describe-task-definition \
-              --task-definition "$TASK_DEF_ARN" \
-              --output json)
-
-            echo "=== CloudWatch Log Configuration ==="
-            echo "$TASK_DEF_JSON" | jq '.taskDefinition.containerDefinitions[] | {
-              name,
-              logDriver: (.logConfiguration.logDriver // "none"),
-              logGroup: (.logConfiguration.options["awslogs-group"] // "n/a"),
-              logRegion: (.logConfiguration.options["awslogs-region"] // "n/a"),
-              logStreamPrefix: (.logConfiguration.options["awslogs-stream-prefix"] // "n/a")
-            }'
-
-            echo "=== Likely CloudWatch Log Streams (if awslogs-stream-prefix is set) ==="
-            echo "$TASKS_JSON" | jq -r '.tasks[] | .taskArn as $taskArn | .containers[] | "\(.name)|\($taskArn)"' | while IFS='|' read -r CONTAINER_NAME TASK_ARN; do
-              TASK_ID="${TASK_ARN##*/}"
-              STREAM_PREFIX=$(echo "$TASK_DEF_JSON" | jq -r --arg NAME "$CONTAINER_NAME" '.taskDefinition.containerDefinitions[] | select(.name == $NAME) | .logConfiguration.options["awslogs-stream-prefix"] // empty')
-              LOG_GROUP=$(echo "$TASK_DEF_JSON" | jq -r --arg NAME "$CONTAINER_NAME" '.taskDefinition.containerDefinitions[] | select(.name == $NAME) | .logConfiguration.options["awslogs-group"] // empty')
-              if [ -n "$STREAM_PREFIX" ] && [ -n "$LOG_GROUP" ]; then
-                echo "container=$CONTAINER_NAME group=$LOG_GROUP stream=$STREAM_PREFIX/$CONTAINER_NAME/$TASK_ID"
-              fi
-            done
-          else
-            echo "No stopped tasks found for this service."
-          fi
-
-          exit 1
+          aws lambda wait function-updated \
+            --function-name "${BACKEND_LAMBDA_FUNCTION_NAME}"
 
   deploy-frontend:
     needs: test
@@ -290,31 +98,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve frontend deploy settings (Variables or Secrets)
+      - name: Resolve frontend deploy settings
         env:
           V_BUCKET: ${{ vars.FRONTEND_S3_BUCKET }}
           S_BUCKET: ${{ secrets.FRONTEND_S3_BUCKET }}
           V_DIST: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
           S_DIST: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
-          V_API: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
-          S_API: ${{ secrets.NEXT_PUBLIC_API_BASE_URL }}
         run: |
           set -e
           BUCKET="${V_BUCKET:-$S_BUCKET}"
           DIST="${V_DIST:-$S_DIST}"
-          API="${V_API:-$S_API}"
           MISSING=""
           [ -z "$BUCKET" ] && MISSING="$MISSING FRONTEND_S3_BUCKET"
           [ -z "$DIST" ] && MISSING="$MISSING CLOUDFRONT_DISTRIBUTION_ID"
-          [ -z "$API" ] && MISSING="$MISSING NEXT_PUBLIC_API_BASE_URL"
           if [ -n "$MISSING" ]; then
             echo "::error::Define these on GitHub Environment dev (or repo Actions Variables/Secrets), exact names:$MISSING"
-            echo "::notice::Settings → Environments → dev → Environment variables / secrets"
             exit 1
           fi
           echo "FRONTEND_S3_BUCKET=$BUCKET" >> "$GITHUB_ENV"
           echo "CLOUDFRONT_DISTRIBUTION_ID=$DIST" >> "$GITHUB_ENV"
-          echo "NEXT_PUBLIC_API_BASE_URL=$API" >> "$GITHUB_ENV"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4

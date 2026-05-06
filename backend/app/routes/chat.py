@@ -21,7 +21,7 @@ class ChatResponse(BaseModel):
 
 
 def get_chat_engine(request: Request) -> ChatEngine:
-    # The chat engine is attached to app.state during startup (see main.py lifespan).
+    # The chat engine is attached to app.state in main.py.
     # Return 503 if startup failed so the client gets a clear error.
     chat_engine = getattr(request.app.state, "chat_engine", None)
     if chat_engine is None:

@@ -1,39 +1,28 @@
-locals {
-  backend_base = trimsuffix(var.backend_https_url, "/")
-}
-
 resource "aws_apigatewayv2_api" "this" {
   name          = "${var.name_prefix}-http-api"
   protocol_type = "HTTP"
 }
 
-# Two integrations are required:
-# - proxy: handles all paths except root (e.g. /chat, /health)
-# - root:  handles bare "/" requests (used by API Gateway health probes)
-resource "aws_apigatewayv2_integration" "proxy" {
+resource "aws_apigatewayv2_integration" "lambda" {
   api_id             = aws_apigatewayv2_api.this.id
-  integration_type   = "HTTP_PROXY"
-  integration_method = "ANY"
-  integration_uri    = "${local.backend_base}/{proxy}"
-}
+  integration_type   = "AWS_PROXY"
+  integration_method = "POST"
+  integration_uri    = var.lambda_invoke_arn
 
-resource "aws_apigatewayv2_integration" "root" {
-  api_id             = aws_apigatewayv2_api.this.id
-  integration_type   = "HTTP_PROXY"
-  integration_method = "ANY"
-  integration_uri    = local.backend_base
+  payload_format_version = "2.0"
+  timeout_milliseconds   = 29000
 }
 
 resource "aws_apigatewayv2_route" "proxy" {
   api_id    = aws_apigatewayv2_api.this.id
   route_key = "ANY /{proxy+}"
-  target    = "integrations/${aws_apigatewayv2_integration.proxy.id}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 
 resource "aws_apigatewayv2_route" "root" {
   api_id    = aws_apigatewayv2_api.this.id
   route_key = "ANY /"
-  target    = "integrations/${aws_apigatewayv2_integration.root.id}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 
 resource "aws_apigatewayv2_stage" "default" {
@@ -46,4 +35,12 @@ resource "aws_apigatewayv2_stage" "default" {
     throttling_rate_limit    = var.throttling_rate_limit
     detailed_metrics_enabled = true
   }
+}
+
+resource "aws_lambda_permission" "api_gateway" {
+  statement_id  = "AllowExecutionFromHttpApi"
+  action        = "lambda:InvokeFunction"
+  function_name = var.lambda_function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.this.execution_arn}/*/*"
 }

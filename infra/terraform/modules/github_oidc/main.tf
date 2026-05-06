@@ -52,85 +52,13 @@ resource "aws_iam_role" "github_actions" {
 
 data "aws_iam_policy_document" "permissions" {
   statement {
-    sid       = "ECRAuth"
-    effect    = "Allow"
-    actions   = ["ecr:GetAuthorizationToken"]
-    resources = ["*"]
-  }
-
-  statement {
-    sid    = "ECRPush"
+    sid    = "LambdaBackendDeploy"
     effect = "Allow"
     actions = [
-      "ecr:BatchCheckLayerAvailability",
-      "ecr:GetDownloadUrlForLayer",
-      "ecr:BatchGetImage",
-      "ecr:PutImage",
-      "ecr:InitiateLayerUpload",
-      "ecr:UploadLayerPart",
-      "ecr:CompleteLayerUpload",
+      "lambda:GetFunction",
+      "lambda:UpdateFunctionCode",
     ]
-    resources = var.ecr_repository_arns
-  }
-
-  statement {
-    sid    = "ECSDescribe"
-    effect = "Allow"
-    actions = [
-      "ecs:DescribeTaskDefinition",
-      "ecs:ListTaskDefinitions",
-      "ecs:DescribeClusters",
-      "ecs:DescribeServices",
-    ]
-    resources = ["*"]
-  }
-
-  statement {
-    sid       = "ECSRegisterTaskDef"
-    effect    = "Allow"
-    actions   = ["ecs:RegisterTaskDefinition"]
-    resources = ["*"]
-  }
-
-  statement {
-    sid    = "ECSUpdateService"
-    effect = "Allow"
-    actions = [
-      "ecs:UpdateService",
-      "ecs:WaitUntilServicesStable",
-    ]
-    resources = [
-      "arn:aws:ecs:${local.region}:${local.account_id}:service/*/*",
-    ]
-  }
-
-  statement {
-    sid    = "IAMManageInlineRolePolicy"
-    effect = "Allow"
-    actions = [
-      "iam:PutRolePolicy",
-      "iam:GetRole",
-      "iam:GetRolePolicy",
-    ]
-    resources = [
-      "arn:aws:iam::${local.account_id}:role/*",
-    ]
-  }
-
-  # IAM PassRole – required when registering an ECS task definition that
-  # references a task execution role or task role
-  statement {
-    sid     = "IAMPassRole"
-    effect  = "Allow"
-    actions = ["iam:PassRole"]
-    resources = [
-      "arn:aws:iam::${local.account_id}:role/*",
-    ]
-    condition {
-      test     = "StringLike"
-      variable = "iam:PassedToService"
-      values   = ["ecs-tasks.amazonaws.com"]
-    }
+    resources = [var.lambda_function_arn]
   }
 
   # S3 – frontend static site sync

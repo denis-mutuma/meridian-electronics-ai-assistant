@@ -9,11 +9,6 @@ variable "github_repo" {
   type        = string
 }
 
-variable "ecr_repository_arns" {
-  description = "ARNs of ECR repositories the role may push to"
-  type        = list(string)
-}
-
 variable "s3_bucket_arn" {
   description = "ARN of the frontend S3 bucket"
   type        = string
@@ -21,6 +16,11 @@ variable "s3_bucket_arn" {
 
 variable "cloudfront_distribution_arn" {
   description = "ARN of the CloudFront distribution"
+  type        = string
+}
+
+variable "lambda_function_arn" {
+  description = "ARN of the backend Lambda function"
   type        = string
 }
 
