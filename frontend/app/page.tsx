@@ -1,61 +1,100 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 
-import { sendChat } from "../lib/api";
+import { ChatHistoryMessage, sendChat } from "../lib/api";
 
 type Message = {
+  id: string;
   role: "user" | "assistant";
   content: string;
+  status?: "sending" | "failed" | "streaming";
 };
 
 const RECENT_HISTORY_LIMIT = 8;
+const id = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 export default function HomePage() {
-  // Email gate: the user must confirm their email before entering the chat.
-  // The email is not stored in a session or cookie — it is passed as a plain
-  // field on every request so the backend can look up the customer's data.
   const [email, setEmail] = useState("");
   const [emailConfirmed, setEmailConfirmed] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const abortRef = useRef<AbortController | null>(null);
+  const streamRef = useRef(0);
 
-  const handleEmailSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    if (email.trim()) {
-      setEmailConfirmed(true);
+  const history = (skipId?: string): ChatHistoryMessage[] =>
+    messages
+      .filter((m) => m.id !== skipId && m.status !== "failed")
+      .slice(-RECENT_HISTORY_LIMIT)
+      .map(({ role, content }) => ({ role, content }));
+
+  const patchMessage = (messageId: string, patch: Partial<Message>) =>
+    setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, ...patch } : m)));
+
+  const streamReply = async (reply: string, messageId: string, token: number) => {
+    for (let i = 4; i < reply.length && streamRef.current === token; i += 4) {
+      patchMessage(messageId, { content: reply.slice(0, i) });
+      await sleep(18);
+    }
+    if (streamRef.current === token) {
+      patchMessage(messageId, { content: reply, status: undefined });
     }
   };
 
-  const handleSend = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!input.trim()) {
-      return;
-    }
+  const sendMessage = async (raw: string, retryId?: string) => {
+    const content = raw.trim();
+    if (!content || loading) return;
 
-    const message = input.trim();
-    const history = messages.slice(-RECENT_HISTORY_LIMIT);
+    const userId = retryId ?? id();
+    const controller = new AbortController();
+    const token = streamRef.current + 1;
+    abortRef.current = controller;
+    streamRef.current = token;
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: message }]);
-    setLoading(true);
     setError("");
+    setLoading(true);
+    setMessages((prev) => {
+      const userMessage: Message = { id: userId, role: "user", content, status: "sending" };
+      return retryId ? prev.map((m) => (m.id === retryId ? userMessage : m)) : [...prev, userMessage];
+    });
 
     try {
-      // Pass the confirmed email on every message — the backend uses it to
-      // scope MCP tool calls to the correct customer.
-      const reply = await sendChat(email, message, history);
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+      const reply = await sendChat(email, content, history(retryId), controller.signal);
+      const assistantId = id();
+      patchMessage(userId, { status: undefined });
+      setMessages((prev) => [
+        ...prev,
+        { id: assistantId, role: "assistant", content: "", status: "streaming" },
+      ]);
+      await streamReply(reply, assistantId, token);
     } catch (exc) {
       const reason = exc instanceof Error ? exc.message : "unknown error";
-      setError(`Chat request failed: ${reason}`);
+      setError(reason === "request cancelled" ? "Chat request cancelled." : `Chat request failed: ${reason}`);
+      patchMessage(userId, { status: "failed" });
     } finally {
+      abortRef.current = null;
       setLoading(false);
     }
   };
 
-  // Screen 1: email gate
+  const handleEmailSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    if (email.trim()) setEmailConfirmed(true);
+  };
+
+  const handleSend = async (event: FormEvent) => {
+    event.preventDefault();
+    await sendMessage(input);
+  };
+
+  const cancel = () => {
+    streamRef.current += 1;
+    abortRef.current?.abort();
+  };
+
   if (!emailConfirmed) {
     return (
       <main style={{ maxWidth: 480, margin: "80px auto", padding: 24 }}>
@@ -76,17 +115,49 @@ export default function HomePage() {
     );
   }
 
-  // Screen 2: chat
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
       <h1>Meridian Electronics Assistant</h1>
       <p style={{ color: "#57606a" }}>Signed in as <strong>{email}</strong></p>
 
-      <section style={{ border: "1px solid #d0d7de", borderRadius: 10, minHeight: 320, padding: 16 }}>
-        {messages.map((message, index) => (
-          <p key={`${message.role}-${index}`}>
-            <strong>{message.role === "user" ? "You" : "Assistant"}:</strong> {message.content}
-          </p>
+      <section
+        aria-label="Chat messages"
+        aria-live="polite"
+        style={{
+          border: "1px solid #d0d7de",
+          borderRadius: 10,
+          minHeight: 320,
+          padding: 16,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        {messages.map((m) => (
+          <div
+            key={m.id}
+            style={{
+              alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+              maxWidth: "78%",
+              border: "1px solid #d0d7de",
+              borderRadius: 8,
+              padding: "10px 12px",
+              background: m.role === "user" ? "#f6f8fa" : "#ffffff",
+            }}
+          >
+            <div style={{ color: "#57606a", fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+              {m.role === "user" ? "You" : "Assistant"}
+              {m.status === "sending" && " - sending"}
+              {m.status === "failed" && " - failed"}
+              {m.status === "streaming" && " - typing"}
+            </div>
+            <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
+            {m.status === "failed" && (
+              <button type="button" disabled={loading} onClick={() => sendMessage(m.content, m.id)} style={{ marginTop: 8 }}>
+                Retry
+              </button>
+            )}
+          </div>
         ))}
         {loading && <p>Assistant is thinking...</p>}
       </section>
@@ -99,9 +170,8 @@ export default function HomePage() {
           style={{ flex: 1 }}
           disabled={loading}
         />
-        <button type="submit" disabled={loading}>
-          Send
-        </button>
+        <button type="submit" disabled={loading || !input.trim()}>Send</button>
+        {loading && <button type="button" onClick={cancel}>Cancel</button>}
       </form>
 
       {error && <p style={{ color: "#b42318" }}>{error}</p>}

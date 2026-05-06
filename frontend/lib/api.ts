@@ -47,6 +47,7 @@ export async function sendChat(
   customerEmail: string,
   message: string,
   history: ChatHistoryMessage[] = [],
+  signal?: AbortSignal,
 ): Promise<string> {
   let response: Response;
 
@@ -57,8 +58,12 @@ export async function sendChat(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ customer_email: customerEmail, message, history }),
+      signal,
     });
-  } catch {
+  } catch (exc) {
+    if (exc instanceof DOMException && exc.name === "AbortError") {
+      throw new ChatApiError("request cancelled");
+    }
     throw new ChatApiError("network error");
   }
 
